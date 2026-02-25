@@ -1,0 +1,11 @@
+Timestamp,Video Source,Verdict,AI Reasoning
+2026-02-24 13:59:16,testvideo.mp4,[CLEAR],"[CLEAR] 
+
+This video presents no physics violations. The object is held securely by the person's hands, adhering to standard gravitational and structural logic. Movement is consistent with natural human motion and momentum."
+2026-02-24 14:02:27,testvideo2.mp4,[VETO],"[VETO]
+
+The video contains a clear violation of physics:
+
+1. **Gravity Violation:** Between 0:03 and 0:06, the paper roll remains suspended in mid-air without any visible support or attachment. According to the law of universal gravitation, the object should accelerate toward the ground at approximately 9.8 m/s² once released. 
+
+While this is a common ""levitation"" magic trick (likely using invisible thread), from a strictly physical auditing perspective, the object's behavior is impossible without an external upward force to counteract gravity."
