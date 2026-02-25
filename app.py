@@ -16,19 +16,20 @@ st.title("🧠 World Auditor: The Reality Layer")
 st.markdown("### Benchmarking AI Commonsense across Video, Image, and Text")
 
 # --- SIDEBAR: Settings ---
+# --- SIDEBAR: Settings ---
 with st.sidebar:
     st.header("⚙️ Configuration")
-    # 2. Auto-load the API key from your .env file so you don't have to type it
-    default_key = os.getenv("GOOGLE_API_KEY", "")
-    api_key = st.text_input("Google API Key", value=default_key, type="password")
     
-    committee = st.multiselect(
-        "Select Committee", 
-        ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro"],
-        default=["gemini-2.5-flash-lite", "gemini-2.0-flash"]
-    )
-    st.info("The Committee will cross-examine your input to find logic discrepancies.")
-
+    # Force the app to only use the back-end secret
+    api_key = st.secrets.get("GOOGLE_API_KEY")
+    
+    if api_key:
+        st.success("🔒 System Secure: Logic Engine Active")
+    else:
+        # This only shows if you forgot to add the key to Streamlit Settings
+        st.error("🚨 SECURITY ERROR: API Key Missing from Secrets Manager.")
+        st.info("Go to App Settings > Secrets to add your GOOGLE_API_KEY.")
+        st.stop() # Stops the app from running without a key
 # --- MAIN UI: Upload ---
 col1, col2 = st.columns([1, 1])
 
