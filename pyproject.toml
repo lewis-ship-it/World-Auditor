@@ -1,0 +1,6 @@
+[project]
+name = "safetylayer"
+version = "0.1.0"
+description = "Deterministic physics safety middleware for robotics"
+authors = [{ name="Your Name" }]
+dependencies = []
