@@ -78,30 +78,37 @@ compare_mode = st.sidebar.checkbox("Compare with another Robot?")
 # CORE ENGINE EXECUTION
 # -------------------------
 def run_audit(p_data, v, d, decel, load, fric, slp):
-    # Mapping to your AgentState class attributes
+    # Ensure these keys match EXACTLY what is in agent.py
     agent = AgentState(
-        velocity=v, 
-        max_deceleration=decel, 
-        mass=p_data["mass"], 
-        load_weight=load, 
-        max_load=p_data["max_load"], 
-        center_of_mass_height=p_data["com_height"], 
-        wheelbase=p_data["wheelbase"]
+        velocity=float(v), 
+        max_deceleration=float(decel), 
+        mass=float(p_data["mass"]), 
+        load_weight=float(load), 
+        max_load=float(p_data["max_load"]), 
+        center_of_mass_height=float(p_data["com_height"]), 
+        wheelbase=float(p_data["wheelbase"])
     )
     
-    # Mapping to your EnvironmentState class
-    env = EnvironmentState(distance_to_obstacle=d, friction=fric, slope=slp)
+    # Also ensure EnvironmentState matches environment.py
+    env = EnvironmentState(
+        distance_to_obstacle=float(d), 
+        friction=float(fric), 
+        slope=float(slp)
+    )
     
-    # Creating WorldState as required by your engine
+    # IMPORTANT: WorldState requires specific primitives (Vector3, etc.)
+    # If your code crashes here, we may need to initialize Vector3(0,0,0) for gravity.
     world_state = WorldState(
         timestamp=datetime.now().timestamp(),
         delta_time=0.1,
-        gravity=None, # Assuming Vector3 or None based on your primitives
+        gravity=None, # Change to Vector3(0, -9.81, 0) if your code requires it
         environment=env,
         agents=[agent],
         objects=[],
         uncertainty=None
     )
+    
+    # ... rest of the engine code
     
     engine = SafetyEngine()
     # Adding the constraints from your /constraints/ folder
