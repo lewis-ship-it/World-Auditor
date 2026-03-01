@@ -1,23 +1,26 @@
-from math import sqrt
-from alignment_core.world_model.primitives import Vector3
+from ..engine.constraint import ConstraintResult
+import math
 
-def check_stability(agent, gravity_z: float) -> bool:
-    """
-    Checks if lateral acceleration exceeds tipping threshold:
-    Threshold = (Support_Width / (2 * CG_Height)) * Gravity.
-    """
-    if not agent.support_polygon or agent.center_of_mass.z == 0:
-        return True # Cannot calculate, assume stable
+class StabilityConstraint:
 
-    # 1. Calculate Lateral Acceleration (v * omega)
-    speed = sqrt(agent.velocity.x**2 + agent.velocity.y**2)
-    a_lat = speed * abs(agent.angular_velocity.z)
+    def evaluate(self, world_state):
+        results = []
 
-    # 2. Determine Support Width
-    xs = [p.x for p in agent.support_polygon]
-    width = max(xs) - min(xs)
+        for agent in world_state.agents:
 
-    # 3. Tipping Threshold
-    threshold = (width / (2 * agent.center_of_mass.z)) * abs(gravity_z)
+            slope_rad = math.radians(world_state.environment.slope)
 
-    return a_lat < threshold
+            # tipping condition approximation
+            tipping_angle = math.atan(agent.wheelbase / (2 * agent.center_of_mass_height))
+
+            violated = slope_rad > tipping_angle
+
+            results.append(
+                ConstraintResult(
+                    name="Stability",
+                    violated=violated,
+                    message=f"Slope {world_state.environment.slope}° / Max safe {math.degrees(tipping_angle):.2f}°"
+                )
+            )
+
+        return results

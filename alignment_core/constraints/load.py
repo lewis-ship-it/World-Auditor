@@ -1,21 +1,30 @@
-from .base import Constraint, ConstraintResult
+from ..engine.constraint import ConstraintResult
 
-
-class LoadConstraint(Constraint):
-    name = "LoadOverCapacity"
-    severity = "hard"
+class LoadConstraint:
 
     def evaluate(self, world_state):
-        agent = world_state.agent
+        results = []
 
-        violated = agent.load_weight > agent.max_load
+        for agent in world_state.agents:
 
-        return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            {
-                "load_weight": agent.load_weight,
-                "max_load": agent.max_load,
-            },
-        )
+            if agent.load_weight < 0:
+                results.append(
+                    ConstraintResult(
+                        name="Load",
+                        violated=True,
+                        message="Negative load detected."
+                    )
+                )
+                continue
+
+            violated = agent.load_weight > agent.max_load
+
+            results.append(
+                ConstraintResult(
+                    name="Load",
+                    violated=violated,
+                    message=f"Load {agent.load_weight}kg / Max {agent.max_load}kg"
+                )
+            )
+
+        return results

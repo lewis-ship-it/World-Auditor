@@ -1,38 +1,46 @@
-from dataclasses import dataclass
-from typing import List
-from math import sqrt
-from alignment_core.world_model.primitives import Vector3
+import math
+from ..engine.constraint import ConstraintResult
 
-@dataclass
-class BrakingViolation:
-    agent_id: str
-    stopping_distance: float
-    available_distance: float
-    severity: str
+class BrakingConstraint:
 
-def compute_slope_adjusted_deceleration(friction: float, gravity_z: float, slope_vector: Vector3) -> float:
-    """Calculates max deceleration adjusted for terrain angle."""
-    g = abs(gravity_z)
-    slope_mag = sqrt(slope_vector.x**2 + slope_vector.y**2 + slope_vector.z**2)
-    
-    if slope_mag == 0:
-        return friction * g
+    def evaluate(self, world_state):
+        results = []
 
-    # sin_theta > 0 is uphill (helps), sin_theta < 0 is downhill (fights)
-    sin_theta = slope_vector.z / slope_mag
-    gravity_component = g * sin_theta
-    
-    return (friction * g) + gravity_component
+        g = abs(world_state.gravity.z)
 
-def compute_stopping_distance(speed: float, friction: float, gravity_z: float, slope_vector: Vector3 = None) -> float:
-    """Core kinematic equation: d = v² / 2a."""
-    if slope_vector:
-        a_max = compute_slope_adjusted_deceleration(friction, gravity_z, slope_vector)
-    else:
-        a_max = friction * abs(gravity_z)
+        for agent in world_state.agents:
 
-    # Safety: If deceleration is zero or negative, the object never stops
-    if a_max <= 0.05:
-        return float("inf")
+            v = agent.velocity.x
+            slope_rad = math.radians(world_state.environment.slope)
+            friction = world_state.environment.friction
 
-    return (speed ** 2) / (2 * a_max)
+            # effective deceleration
+            gravity_component = g * math.sin(slope_rad)
+            friction_component = friction * g * math.cos(slope_rad)
+
+            effective_decel = friction_component - gravity_component
+
+            if effective_decel <= 0:
+                results.append(
+                    ConstraintResult(
+                        name="Braking",
+                        violated=True,
+                        message="Vehicle cannot brake on this slope."
+                    )
+                )
+                continue
+
+            stopping_distance = (v ** 2) / (2 * effective_decel)
+            distance_available = world_state.environment.distance_to_obstacle
+
+            violated = stopping_distance > distance_available
+
+            results.append(
+                ConstraintResult(
+                    name="Braking",
+                    violated=violated,
+                    message=f"Stopping distance {stopping_distance:.2f}m, available {distance_available:.2f}m"
+                )
+            )
+
+        return results

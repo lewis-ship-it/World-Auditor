@@ -1,18 +1,16 @@
-from alignment_core.constraints.registry import ConstraintRegistry
-
-
 class SafetyEngine:
+
     def __init__(self):
-        self.registry = ConstraintRegistry()
+        self.constraints = []
 
     def register_constraint(self, constraint):
-        self.registry.register(constraint)
+        self.constraints.append(constraint)
 
     def evaluate(self, world_state):
         results = []
 
-        for constraint in self.registry.get_all():
-            result = constraint.evaluate(world_state)
-            results.append(result)
+        for constraint in self.constraints:
+            constraint_results = constraint.evaluate(world_state)
+            results.extend(constraint_results)
 
         return results
