@@ -7,7 +7,7 @@ class StabilityConstraint(Constraint):
     severity = "hard"
 
     def evaluate(self, world_state):
-        agent = world_state.agent
+        agent = world_state.agents
         env = world_state.environment
 
         slope = env.slope
