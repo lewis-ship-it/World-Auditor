@@ -1,119 +1,189 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-from google import genai
-import json
-import time
-import os
-from dotenv import load_dotenv
+from datetime import datetime
 
-# Import your Alignment Core modules
-from alignment_core.world_model.braking import compute_stopping_distance
-from alignment_core.world_model.primitives import Vector3
+# Import your engine
+from alignment_core.engine import SafetyEngine, SafetyReport
+from alignment_core.constraints import BrakingConstraint
+from alignment_core.world_model import Agent, Environment, WorldState
 
-load_dotenv()
 
-st.set_page_config(page_title="World Auditor | AI Reality Benchmarker", layout="wide")
-st.title("🧠 World Auditor: The Reality Layer")
-with st.sidebar:
-    st.header("👤 Auditor Profile")
-    username = st.text_input("Enter Auditor Name", "Guest_User")
-    st.session_state['username'] = username
-    
-    # Simple 'Experience Points' mock
-    if 'xp' not in st.session_state:
-        st.session_state['xp'] = 0
-    st.info(f"Auditor Level: {st.session_state['xp'] // 10} | XP: {st.session_state['xp']}")
+st.set_page_config(page_title="AI Physics Commonsense Auditor", layout="wide")
 
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    api_key = st.secrets.get("GOOGLE_API_KEY")
-    # FIX: Defined the committee list to prevent the 'NameError'
-    committee = ["gemini-1.5-flash", "gemini-1.5-pro"]
-    
-    if api_key:
-        st.success("🔒 System Secure: Logic Engine Active")
-    else:
-        st.error("🚨 SECURITY ERROR: API Key Missing.")
-        st.stop()
+st.title("AI Physics Commonsense Auditor")
+st.markdown("Deterministic Safety Layer for AI Actions")
 
-col1, col2 = st.columns([1, 1])
 
-with col1:
-    st.subheader("📡 Input Feed")
-    input_type = st.radio("Select Type", ["Text", "Image", "Video"])
-    user_input = st.file_uploader(f"Upload {input_type}", type=["jpg", "png", "mp4", "mov"])
-    
-    if user_input:
-        if input_type == "Video": st.video(user_input)
-        else: st.image(user_input)
+# -----------------------------
+# Sidebar Mode Selection
+# -----------------------------
+mode = st.sidebar.selectbox(
+    "Select Demo Mode",
+    [
+        "Interactive Physics Simulator",
+        "Upload Image + Action",
+        "Upload Video + Action",
+        "Text Action Audit",
+    ],
+)
 
-if st.button("🚀 RUN REALITY AUDIT") and user_input:
-    client = genai.Client(api_key=api_key)
-    results = []
-    
-    with st.spinner("Analyzing Physics Alignment..."):
-        file_mime_type = user_input.type 
-        with open("temp_file", "wb") as f:
-            f.write(user_input.getbuffer())
-        
-        # Uploading to Google GenAI
-        payload = client.files.upload(file="temp_file", config={'mime_type': file_mime_type})
-        while payload.state == "PROCESSING":
-            time.sleep(2)
-            payload = client.files.get(name=payload.name)
+# -----------------------------
+# MODE 1 — SIMULATOR
+# -----------------------------
+if mode == "Interactive Physics Simulator":
 
-        # Updated Visual Auditor Prompt
-        prompt = """
-        Analyze this clip as a Physics Auditor. Return ONLY a JSON object:
-        {
-            "estimated_speed": float,
-            "friction_coeff": float,
-            "slope_z": float,
-            "dist_to_hazard": float,
-            "verdict": "VETO/CLEAR",
-            "reasoning": "string"
-        }
-        """
+    st.header("Simulated Robot Action")
 
-        for model in committee:
-            try:
-                response = client.models.generate_content(
-                    model=model, 
-                    contents=[payload, prompt],
-                    config={'response_mime_type': 'application/json'}
-                )
-                data = json.loads(response.text)
-                
-                # --- REALITY BRIDGE: Connect AI Perception to your Braking Math ---
-                # We pass the AI's estimated slope_z into our local physics function
-                calc_stop = compute_stopping_distance(
-                    speed=data['estimated_speed'],
-                    friction=data['friction_coeff'],
-                    gravity_z=-9.81,
-                    slope_vector=Vector3(x=0, y=0, z=data['slope_z'])
-                )
-                
-                data['physics_stop_dist'] = round(calc_stop, 2)
-                data['model'] = model
-                
-                # Compare AI prediction vs Physical Reality
-                if calc_stop > data['dist_to_hazard']:
-                    data['verdict'] = "VETO"
-                    data['reasoning'] += f" | Reality Breach: Object cannot stop in time."
-                
-                results.append(data)
-            except Exception as e:
-                st.error(f"Audit Error ({model}): {e}")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        velocity = st.slider("Velocity (m/s)", 0.0, 15.0, 5.0)
+        max_deceleration = st.slider("Max Deceleration (m/s²)", 0.1, 10.0, 2.0)
 
     with col2:
-        st.subheader("📊 Audit Results")
-        if results:
-            df = pd.DataFrame(results)
-            st.plotly_chart(px.bar(df, x="model", y="estimated_speed", color="verdict", title="Perceived Speed vs Safety"))
-            for res in results:
-                with st.expander(f"🔍 {res['model']} Details"):
-                    st.write(f"**Verdict:** {res['verdict']}")
-                    st.write(f"**AI Seen Speed:** {res['estimated_speed']} m/s")
-                    st.write(f"**Physics Required Stop:** {res['physics_stop_dist']} m")
-                    st.info(res['reasoning'])
+        distance_to_obstacle = st.slider("Distance to Obstacle (m)", 0.5, 20.0, 4.0)
+
+    if st.button("Propose Action"):
+
+        agent = Agent(velocity=velocity, max_deceleration=max_deceleration)
+        environment = Environment(distance_to_obstacle=distance_to_obstacle)
+        world_state = WorldState(agent, environment)
+
+        engine = SafetyEngine()
+        engine.register_constraint(BrakingConstraint())
+
+        results = engine.evaluate(world_state)
+        report = SafetyReport(results)
+
+        st.subheader("Safety Decision")
+
+        if report.is_safe():
+            st.success("ALLOW: Action is physically feasible.")
+        else:
+            st.error("BLOCK: Physics violation detected.")
+
+        st.json(report.to_dict())
+
+# -----------------------------
+# MODE 2 — IMAGE + ACTION
+# -----------------------------
+elif mode == "Upload Image + Action":
+
+    st.header("Image-Based Action Audit")
+
+    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+    action_text = st.text_area("Describe the AI's proposed action")
+
+    if uploaded_image:
+        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+
+    if st.button("Audit Action"):
+
+        st.subheader("Physics Analysis")
+
+        if not action_text:
+            st.warning("Please describe the proposed action.")
+        else:
+            # Simple rule-based analysis demo
+            issues = []
+
+            if "fast" in action_text.lower() or "high speed" in action_text.lower():
+                issues.append("Potential braking feasibility risk.")
+
+            if "heavy" in action_text.lower():
+                issues.append("Load stability risk.")
+
+            if "slope" in action_text.lower():
+                issues.append("Slip or tipping risk on incline.")
+
+            if issues:
+                st.error("Physics Concerns Detected:")
+                for issue in issues:
+                    st.write(f"- {issue}")
+            else:
+                st.success("No obvious physics violations detected from description.")
+
+# -----------------------------
+# MODE 3 — VIDEO + ACTION
+# -----------------------------
+elif mode == "Upload Video + Action":
+
+    st.header("Video-Based Action Audit")
+
+    uploaded_video = st.file_uploader("Upload Video", type=["mp4", "mov"])
+    action_text = st.text_area("Describe the AI's proposed action")
+
+    if uploaded_video:
+        st.video(uploaded_video)
+
+    if st.button("Audit Video Action"):
+
+        if not action_text:
+            st.warning("Please describe the proposed action.")
+        else:
+            st.subheader("Physics Risk Assessment")
+
+            risks = []
+
+            if "corner" in action_text.lower():
+                risks.append("High-speed turning may cause tipping.")
+
+            if "gap" in action_text.lower():
+                risks.append("Potential terrain traversal failure.")
+
+            if "overload" in action_text.lower():
+                risks.append("Exceeds load capacity.")
+
+            if risks:
+                st.error("Potential Violations:")
+                for r in risks:
+                    st.write(f"- {r}")
+            else:
+                st.success("No major risks detected from description.")
+
+# -----------------------------
+# MODE 4 — TEXT ONLY
+# -----------------------------
+elif mode == "Text Action Audit":
+
+    st.header("Text-Based Physics Audit")
+
+    action_description = st.text_area("Describe the proposed AI action")
+
+    if st.button("Run Audit"):
+
+        if not action_description:
+            st.warning("Please enter an action.")
+        else:
+
+            st.subheader("Physics Analysis")
+
+            # Very simple numeric parser demo
+            import re
+
+            velocity_match = re.search(r"(\d+)\s*m/s", action_description)
+            distance_match = re.search(r"(\d+)\s*m", action_description)
+
+            if velocity_match and distance_match:
+
+                velocity = float(velocity_match.group(1))
+                distance = float(distance_match.group(1))
+
+                agent = Agent(velocity=velocity, max_deceleration=2.0)
+                environment = Environment(distance_to_obstacle=distance)
+                world_state = WorldState(agent, environment)
+
+                engine = SafetyEngine()
+                engine.register_constraint(BrakingConstraint())
+
+                results = engine.evaluate(world_state)
+                report = SafetyReport(results)
+
+                if report.is_safe():
+                    st.success("ALLOW: Physically feasible.")
+                else:
+                    st.error("BLOCK: Insufficient stopping distance.")
+
+                st.json(report.to_dict())
+
+            else:
+                st.info("Could not parse numeric physics parameters. Provide values like '5 m/s' and '3 m'.")

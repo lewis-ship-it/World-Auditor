@@ -1,23 +1,15 @@
-from .world_state import WorldState
-from .agent import AgentState
-from .objects import ObjectState
-from .environment import EnvironmentState
-from .uncertainty import UncertaintyModel
-from .primitives import (
-    Vector3,
-    Quaternion,
-    BoundingBox,
-    ActuatorLimits
-)
+class Agent:
+    def __init__(self, velocity, max_deceleration):
+        self.velocity = velocity
+        self.max_deceleration = max_deceleration
 
-__all__ = [
-    "WorldState",
-    "AgentState",
-    "ObjectState",
-    "EnvironmentState",
-    "UncertaintyModel",
-    "Vector3",
-    "Quaternion",
-    "BoundingBox",
-    "ActuatorLimits"
-]
+
+class Environment:
+    def __init__(self, distance_to_obstacle):
+        self.distance_to_obstacle = distance_to_obstacle
+
+
+class WorldState:
+    def __init__(self, agent, environment):
+        self.agent = agent
+        self.environment = environment
