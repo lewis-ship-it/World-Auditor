@@ -134,6 +134,7 @@ def run_audit(p_data, v, d, decel, load, fric, slp):
         objects=[],
         uncertainty=UncertaintyModel(0.1, 0.1, 0.1, 0.1)
     )
+    world_state.agent = agent
     
     engine = SafetyEngine()
     engine.register_constraint(BrakingConstraint())
