@@ -1,179 +1,173 @@
 import streamlit as st
 import math
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import json
 from datetime import datetime
 
-from alignment_core.engine import SafetyEngine, SafetyReport
-from alignment_core.constraints import (
-    BrakingConstraint,
-    FrictionConstraint,
-    LoadConstraint,
-    StabilityConstraint,
-)
-from alignment_core.world_model import Agent, Environment, WorldState
-
-
-st.set_page_config(page_title="AI Physics Safety Middleware", layout="wide")
-
-st.title("AI Physics Commonsense Safety Layer")
-st.markdown("Deterministic Middleware for AI-Controlled Robotics")
-
+# --- CORRECTED IMPORT PATHS BASED ON YOUR REPO ---
+from alignment_core.engine.safety_engine import SafetyEngine
+from alignment_core.engine.report import SafetyReport
+from alignment_core.constraints.braking import BrakingConstraint
+from alignment_core.constraints.friction import FrictionConstraint
+from alignment_core.constraints.load import LoadConstraint
+from alignment_core.constraints.stability import StabilityConstraint
+from alignment_core.world_model.agent import AgentState
+from alignment_core.world_model.environment import EnvironmentState
+from alignment_core.world_model import WorldState
 
 # -------------------------
-# ROBOT PROFILES
+# CONFIG & STYLING
 # -------------------------
+st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
 
+st.title("🛡️ SafeBot: Physics Reality Auditor")
+st.markdown("Friendly Deterministic Middleware for AI-Controlled Robotics")
+
+# -------------------------
+# DATA MAPS (User Friendly Presets)
+# -------------------------
 ROBOT_PROFILES = {
     "Warehouse Forklift": {
-        "mass": 4000,
-        "max_load": 2000,
-        "center_of_mass_height": 1.2,
-        "wheelbase": 2.0,
+        "mass": 4000.0, "max_load": 2000.0, "com_height": 1.2, "wheelbase": 2.0,
     },
     "Delivery Rover": {
-        "mass": 80,
-        "max_load": 20,
-        "center_of_mass_height": 0.4,
-        "wheelbase": 0.6,
+        "mass": 80.0, "max_load": 20.0, "com_height": 0.4, "wheelbase": 0.6,
     },
 }
+
+SURFACE_MAP = {
+    "Dry Concrete (Optimal)": 0.8,
+    "Wet Asphalt (Slippery)": 0.4,
+    "Icy Loading Dock (Danger)": 0.15
+}
+
+BRAKE_MAP = {
+    "Brand New / Responsive": 5.0,
+    "Standard / Used": 2.5,
+    "Worn / Failing": 1.0
+}
+
+# -------------------------
+# SIDEBAR CONTROLS
+# -------------------------
+st.sidebar.header("🕹️ Scenario Settings")
+
+# One-Click Stress Tests
+if st.sidebar.button("🚨 Load Emergency Stop Stress Test"):
+    v_init, d_init, s_init = 12.0, 5.0, "Wet Asphalt (Slippery)"
+else:
+    v_init, d_init, s_init = 5.0, 10.0, "Dry Concrete (Optimal)"
 
 profile_name = st.sidebar.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
 profile = ROBOT_PROFILES[profile_name]
 
+surface_key = st.sidebar.selectbox("Road Condition", list(SURFACE_MAP.keys()), index=list(SURFACE_MAP.keys()).index(s_init))
+friction = SURFACE_MAP[surface_key]
+
+brake_key = st.sidebar.select_slider("Brake Condition", options=list(BRAKE_MAP.keys()), value="Standard / Used")
+deceleration = BRAKE_MAP[brake_key]
+
+velocity = st.sidebar.slider("Current Speed (m/s)", 0.0, 15.0, v_init)
+distance = st.sidebar.slider("Distance to Obstacle (m)", 0.5, 20.0, d_init)
+load_weight = st.sidebar.slider("Load Weight (kg)", 0.0, 3000.0, 500.0)
+slope = st.sidebar.slider("Slope Angle (degrees)", 0.0, 45.0, 5.0)
+
+compare_mode = st.sidebar.checkbox("Compare with another Robot?")
 
 # -------------------------
-# SIMULATOR INPUTS
+# CORE ENGINE EXECUTION
 # -------------------------
-
-velocity = st.slider("Velocity (m/s)", 0.0, 15.0, 5.0)
-distance = st.slider("Distance to Obstacle (m)", 0.5, 20.0, 5.0)
-deceleration = st.slider("Max Deceleration (m/s²)", 0.5, 10.0, 2.0)
-load_weight = st.slider("Load Weight (kg)", 0.0, 3000.0, 500.0)
-friction = st.slider("Surface Friction Coefficient", 0.1, 1.0, 0.6)
-slope = st.slider("Slope Angle (degrees)", 0.0, 45.0, 5.0)
-
-
-if st.button("Run Full Safety Audit"):
-
-    agent = Agent(
-        velocity,
-        deceleration,
-        profile["mass"],
-        load_weight,
-        profile["max_load"],
-        profile["center_of_mass_height"],
-        profile["wheelbase"],
+def run_audit(p_data, v, d, decel, load, fric, slp):
+    # Mapping to your AgentState class attributes
+    agent = AgentState(
+        velocity=v, 
+        max_deceleration=decel, 
+        mass=p_data["mass"], 
+        load_weight=load, 
+        max_load=p_data["max_load"], 
+        center_of_mass_height=p_data["com_height"], 
+        wheelbase=p_data["wheelbase"]
     )
-
-    environment = Environment(distance, friction, slope)
-    world_state = WorldState(agent, environment)
-
+    
+    # Mapping to your EnvironmentState class
+    env = EnvironmentState(distance_to_obstacle=d, friction=fric, slope=slp)
+    
+    # Creating WorldState as required by your engine
+    world_state = WorldState(
+        timestamp=datetime.now().timestamp(),
+        delta_time=0.1,
+        gravity=None, # Assuming Vector3 or None based on your primitives
+        environment=env,
+        agents=[agent],
+        objects=[],
+        uncertainty=None
+    )
+    
     engine = SafetyEngine()
+    # Adding the constraints from your /constraints/ folder
     engine.register_constraint(BrakingConstraint())
     engine.register_constraint(FrictionConstraint())
     engine.register_constraint(LoadConstraint())
     engine.register_constraint(StabilityConstraint())
-
+    
     results = engine.evaluate(world_state)
-    report = SafetyReport(results)
+    return SafetyReport(results)
 
-    # -------------------------
-    # DECISION
-    # -------------------------
+report = run_audit(profile, velocity, distance, deceleration, load_weight, friction, slope)
 
-    st.subheader("Safety Decision")
+# -------------------------
+# MAIN DASHBOARD UI
+# -------------------------
 
-    if report.is_safe():
-        st.success("ALLOW: Action is physically feasible.")
-    else:
-        st.error("BLOCK: Physics violation detected.")
+if report.is_safe():
+    st.success("### ✅ CLEAR TO PROCEED")
+else:
+    st.error("### ❌ VETO: PHYSICS VIOLATION")
 
-    # -------------------------
-    # HUMAN EXPLANATION
-    # -------------------------
+# Star Rating
+risk_score = report.risk_score()
+st.write(f"**Safety Rating:** {'⭐' * max(1, 5 - int(risk_score / 20))}")
 
-    explanation = []
+# Impact Zone Visualizer
+required_stop = (velocity ** 2) / (2 * deceleration)
+buffer = distance - required_stop
 
-    for r in report.results:
-        if r.violated:
 
-            if r.name == "BrakingFeasibility":
-                explanation.append(
-                    "The robot cannot stop within the available distance."
-                )
 
-            if r.name == "FrictionSlipRisk":
-                explanation.append(
-                    "Surface friction is insufficient to counter downhill forces."
-                )
+fig_buffer = go.Figure()
+fig_buffer.add_trace(go.Bar(
+    y=["Path"], x=[required_stop], name="Stop Distance",
+    orientation='h', marker_color='#EF553B' if buffer < 0 else '#00CC96'
+))
+if buffer > 0:
+    fig_buffer.add_trace(go.Bar(y=["Path"], x=[buffer], name="Margin", orientation='h', marker_color='#AAAAAA'))
 
-            if r.name == "LoadOverCapacity":
-                explanation.append(
-                    "The load exceeds the robot's rated capacity."
-                )
+fig_buffer.update_layout(barmode='stack', height=180, margin=dict(l=20, r=20, t=20, b=20))
+st.plotly_chart(fig_buffer, use_container_width=True)
 
-            if r.name == "TippingRisk":
-                explanation.append(
-                    "The slope exceeds the robot's tipping stability threshold."
-                )
+# Metrics
+c1, c2, c3 = st.columns(3)
+c1.metric("Required Stop", f"{required_stop:.1f}m")
+c2.metric("Stability", "⚠️ TIPPING" if any(r.name == "Stability" and r.violated for r in report.results) else "✅ OK")
+c3.metric("Load", f"{load_weight}kg")
 
-    if not explanation:
-        explanation.append("All safety checks passed under current conditions.")
+# Auto-Suggestions
+if not report.is_safe():
+    with st.expander("🛠️ How to fix these violations", expanded=True):
+        for r in report.results:
+            if r.violated:
+                if "Braking" in r.name:
+                    safe_v = math.sqrt(2 * deceleration * distance)
+                    st.info(f"👉 Slow down to **{safe_v:.1f} m/s** to stop safely.")
+                if "Load" in r.name:
+                    st.info(f"👉 Remove **{load_weight - profile['max_load']} kg**.")
 
-    st.write(" ".join(explanation))
-
-    # -------------------------
-    # RISK SCORE
-    # -------------------------
-
-    risk_score = sum(50 for r in report.results if r.violated)
-    risk_score = min(risk_score, 100)
-
-    st.subheader("Risk Score")
-    st.progress(risk_score / 100)
-
-    # -------------------------
-    # TRAJECTORY GRAPH
-    # -------------------------
-
-    required_stop = (velocity ** 2) / (2 * deceleration)
-
-    times = [t * 0.1 for t in range(50)]
-    distances = [
-        max(velocity * t - 0.5 * deceleration * t**2, 0) for t in times
-    ]
-
-    fig, ax = plt.subplots()
-    ax.plot(times, distances)
-    ax.axhline(distance, linestyle="--")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Distance Traveled (m)")
-    ax.set_title("Stopping Trajectory")
-
-    st.pyplot(fig)
-
-    # -------------------------
-    # EXPORT REPORT
-    # -------------------------
-
-    report_data = {
-        "timestamp": str(datetime.utcnow()),
-        "robot_profile": profile_name,
-        "inputs": {
-            "velocity": velocity,
-            "distance": distance,
-            "load": load_weight,
-            "friction": friction,
-            "slope": slope,
-        },
-        "violations": [r.name for r in report.results if r.violated],
-    }
-
-    st.download_button(
-        label="Download Safety Report (JSON)",
-        data=json.dumps(report_data, indent=4),
-        file_name="safety_report.json",
-        mime="application/json",
-    )
+# Side-by-Side Comparison
+if compare_mode:
+    st.divider()
+    alt_name = st.selectbox("Compare with:", [k for k in ROBOT_PROFILES.keys() if k != profile_name])
+    alt_report = run_audit(ROBOT_PROFILES[alt_name], velocity, distance, deceleration, load_weight, friction, slope)
+    
+    col_a, col_b = st.columns(2)
+    col_a.metric(f"{profile_name} Risk", f"{report.risk_score()}%")
+    col_b.metric(f"{alt_name} Risk", f"{alt_report.risk_score()}%")
