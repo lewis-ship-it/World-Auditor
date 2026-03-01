@@ -78,40 +78,61 @@ compare_mode = st.sidebar.checkbox("Compare with another Robot?")
 # CORE ENGINE EXECUTION
 # -------------------------
 def run_audit(p_data, v, d, decel, load, fric, slp):
-    # Ensure these keys match EXACTLY what is in agent.py
+    # 1. Initialize required Primitives
+    # Your AgentState needs these specific objects to exist 
+    zero_vec = Vector3(x=0.0, y=0.0, z=0.0)
+    v_vec = Vector3(x=float(v), y=0.0, z=0.0)
+    identity_quat = Quaternion(w=1.0, x=0.0, y=0.0, z=0.0)
+    limits = ActuatorLimits(max_torque=100.0, max_force=100.0, max_speed=10.0, max_acceleration=5.0)
+
+    # 2. Create AgentState with ALL mandatory fields 
     agent = AgentState(
-        velocity=float(v), 
-        max_deceleration=float(decel), 
-        mass=float(p_data["mass"]), 
-        load_weight=float(load), 
-        max_load=float(p_data["max_load"]), 
-        center_of_mass_height=float(p_data["com_height"]), 
+        id="primary_robot",
+        type="mobile",
+        mass=float(p_data["mass"]),
+        position=zero_vec,
+        velocity=v_vec,
+        angular_velocity=zero_vec,
+        orientation=identity_quat,
+        center_of_mass=zero_vec,
+        support_polygon=[],
+        actuator_limits=limits,
+        battery_state=1.0,
+        current_load=None,
+        contact_points=[],
+        # These are the ones used by your physics constraints [cite: 32, 36, 38, 40]
+        loadweight=float(load),
+        max_load=float(p_data["max_load"]),
+        center_of_mass_height=float(p_data["com_height"]),
         wheelbase=float(p_data["wheelbase"])
     )
     
-    # Also ensure EnvironmentState matches environment.py
+    # 3. Create EnvironmentState [cite: 72]
     env = EnvironmentState(
-        distance_to_obstacle=float(d), 
-        friction=float(fric), 
+        temperature=20.0,
+        air_density=1.225,
+        wind_vector=zero_vec,
+        terrain_type="flat",
+        surface_friction=float(fric),
+        slope_vector=zero_vec,
+        lighting_conditions="normal",
+        distance_to_obstacles=float(d),
+        friction=float(fric),
         slope=float(slp)
     )
     
-    # IMPORTANT: WorldState requires specific primitives (Vector3, etc.)
-    # If your code crashes here, we may need to initialize Vector3(0,0,0) for gravity.
+    # 4. Create WorldState 
     world_state = WorldState(
         timestamp=datetime.now().timestamp(),
         delta_time=0.1,
-        gravity=None, # Change to Vector3(0, -9.81, 0) if your code requires it
+        gravity=Vector3(x=0.0, y=0.0, z=-9.81),
         environment=env,
         agents=[agent],
         objects=[],
-        uncertainty=None
+        uncertainty=UncertaintyModel(0.1, 0.1, 0.1, 0.1)
     )
     
-    # ... rest of the engine code
-    
     engine = SafetyEngine()
-    # Adding the constraints from your /constraints/ folder
     engine.register_constraint(BrakingConstraint())
     engine.register_constraint(FrictionConstraint())
     engine.register_constraint(LoadConstraint())
