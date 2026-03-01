@@ -1,32 +1,32 @@
-from .base import Constraint, ConstraintResult
 import math
+from ..engine.constraint import ConstraintResult
 
-
-class FrictionConstraint(Constraint):
-    name = "FrictionSlipRisk"
-    severity = "hard"
+class FrictionConstraint:
 
     def evaluate(self, world_state):
-        agent = world_state.agent
-        env = world_state.environment
+        results = []
 
-        mu = env.friction
-        slope_deg = env.slope
-        g = 9.81
+        g = abs(world_state.gravity.z)
 
-        slope_rad = math.radians(slope_deg)
+        for agent in world_state.agents:
 
-        max_static_force = mu * agent.mass * g * math.cos(slope_rad)
-        downhill_force = agent.mass * g * math.sin(slope_rad)
+            v = agent.velocity.x
+            friction = world_state.environment.friction
 
-        violated = downhill_force > max_static_force
+            # max friction force
+            max_friction_force = friction * agent.total_mass() * g
 
-        return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            {
-                "downhill_force": downhill_force,
-                "max_static_force": max_static_force,
-            },
-        )
+            # required centripetal force (simple slip heuristic)
+            required_force = agent.total_mass() * abs(v)
+
+            violated = required_force > max_friction_force
+
+            results.append(
+                ConstraintResult(
+                    name="Friction",
+                    violated=violated,
+                    message=f"Required force {required_force:.2f}N / Max friction {max_friction_force:.2f}N"
+                )
+            )
+
+        return results
