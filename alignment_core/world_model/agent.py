@@ -22,7 +22,7 @@ class AgentState:
     current_load: Optional[str]
     contact_points: List[Vector3]
 
-    # --- Added structured physical properties ---
+    # --- REQUIRED FOR CONSTRAINTS ---
     load_weight: float
     max_load: float
     center_of_mass_height: float
