@@ -1,37 +1,45 @@
-from .base import Constraint, ConstraintResult
+import math
+from ..engine.constraint import ConstraintResult
 
-
-class BrakingConstraint(Constraint):
-    name = "BrakingFeasibility"
-    severity = "hard"
+class BrakingConstraint:
 
     def evaluate(self, world_state):
-        agent = world_state.agent
-        environment = world_state.environment
+        results = []
 
-        velocity = agent.velocity
-        max_deceleration = agent.max_deceleration
-        distance_to_obstacle = environment.distance_to_obstacle
+        g = abs(world_state.gravity.z)
 
-        if max_deceleration <= 0:
-            return ConstraintResult(
-                name=self.name,
-                violated=True,
-                severity=self.severity,
-                details={"error": "Invalid deceleration value"},
+        for agent in world_state.agents:
+
+            v = agent.velocity.x
+            slope_rad = math.radians(world_state.environment.slope)
+            friction = world_state.environment.friction
+
+            gravity_component = g * math.sin(slope_rad)
+            friction_component = friction * g * math.cos(slope_rad)
+
+            effective_decel = friction_component - gravity_component
+
+            if effective_decel <= 0:
+                results.append(
+                    ConstraintResult(
+                        name="Braking",
+                        violated=True,
+                        message="Vehicle cannot brake on this slope."
+                    )
+                )
+                continue
+
+            stopping_distance = (v ** 2) / (2 * effective_decel)
+            distance_available = world_state.environment.distance_to_obstacle
+
+            violated = stopping_distance > distance_available
+
+            results.append(
+                ConstraintResult(
+                    name="Braking",
+                    violated=violated,
+                    message=f"Stopping distance {stopping_distance:.2f}m, available {distance_available:.2f}m"
+                )
             )
 
-        required_stop_distance = (velocity ** 2) / (2 * max_deceleration)
-
-        violated = required_stop_distance > distance_to_obstacle
-
-        return ConstraintResult(
-            name=self.name,
-            violated=violated,
-            severity=self.severity,
-            details={
-                "velocity": velocity,
-                "required_stop_distance": required_stop_distance,
-                "available_distance": distance_to_obstacle,
-            },
-        )
+        return results
