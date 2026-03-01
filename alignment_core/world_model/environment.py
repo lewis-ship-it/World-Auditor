@@ -11,3 +11,6 @@ class EnvironmentState:
     surface_friction: float
     slope_vector: Vector3
     lighting_conditions: str
+    distance_to_obstacles: float
+    friction: float
+    slope: float

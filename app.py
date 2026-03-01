@@ -1,189 +1,179 @@
 import streamlit as st
+import math
+import matplotlib.pyplot as plt
+import json
 from datetime import datetime
 
-# Import your engine
 from alignment_core.engine import SafetyEngine, SafetyReport
-from alignment_core.constraints import BrakingConstraint
+from alignment_core.constraints import (
+    BrakingConstraint,
+    FrictionConstraint,
+    LoadConstraint,
+    StabilityConstraint,
+)
 from alignment_core.world_model import Agent, Environment, WorldState
 
 
-st.set_page_config(page_title="AI Physics Commonsense Auditor", layout="wide")
+st.set_page_config(page_title="AI Physics Safety Middleware", layout="wide")
 
-st.title("AI Physics Commonsense Auditor")
-st.markdown("Deterministic Safety Layer for AI Actions")
+st.title("AI Physics Commonsense Safety Layer")
+st.markdown("Deterministic Middleware for AI-Controlled Robotics")
 
 
-# -----------------------------
-# Sidebar Mode Selection
-# -----------------------------
-mode = st.sidebar.selectbox(
-    "Select Demo Mode",
-    [
-        "Interactive Physics Simulator",
-        "Upload Image + Action",
-        "Upload Video + Action",
-        "Text Action Audit",
-    ],
-)
+# -------------------------
+# ROBOT PROFILES
+# -------------------------
 
-# -----------------------------
-# MODE 1 — SIMULATOR
-# -----------------------------
-if mode == "Interactive Physics Simulator":
+ROBOT_PROFILES = {
+    "Warehouse Forklift": {
+        "mass": 4000,
+        "max_load": 2000,
+        "center_of_mass_height": 1.2,
+        "wheelbase": 2.0,
+    },
+    "Delivery Rover": {
+        "mass": 80,
+        "max_load": 20,
+        "center_of_mass_height": 0.4,
+        "wheelbase": 0.6,
+    },
+}
 
-    st.header("Simulated Robot Action")
+profile_name = st.sidebar.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
+profile = ROBOT_PROFILES[profile_name]
 
-    col1, col2 = st.columns(2)
 
-    with col1:
-        velocity = st.slider("Velocity (m/s)", 0.0, 15.0, 5.0)
-        max_deceleration = st.slider("Max Deceleration (m/s²)", 0.1, 10.0, 2.0)
+# -------------------------
+# SIMULATOR INPUTS
+# -------------------------
 
-    with col2:
-        distance_to_obstacle = st.slider("Distance to Obstacle (m)", 0.5, 20.0, 4.0)
+velocity = st.slider("Velocity (m/s)", 0.0, 15.0, 5.0)
+distance = st.slider("Distance to Obstacle (m)", 0.5, 20.0, 5.0)
+deceleration = st.slider("Max Deceleration (m/s²)", 0.5, 10.0, 2.0)
+load_weight = st.slider("Load Weight (kg)", 0.0, 3000.0, 500.0)
+friction = st.slider("Surface Friction Coefficient", 0.1, 1.0, 0.6)
+slope = st.slider("Slope Angle (degrees)", 0.0, 45.0, 5.0)
 
-    if st.button("Propose Action"):
 
-        agent = Agent(velocity=velocity, max_deceleration=max_deceleration)
-        environment = Environment(distance_to_obstacle=distance_to_obstacle)
-        world_state = WorldState(agent, environment)
+if st.button("Run Full Safety Audit"):
 
-        engine = SafetyEngine()
-        engine.register_constraint(BrakingConstraint())
+    agent = Agent(
+        velocity,
+        deceleration,
+        profile["mass"],
+        load_weight,
+        profile["max_load"],
+        profile["center_of_mass_height"],
+        profile["wheelbase"],
+    )
 
-        results = engine.evaluate(world_state)
-        report = SafetyReport(results)
+    environment = Environment(distance, friction, slope)
+    world_state = WorldState(agent, environment)
 
-        st.subheader("Safety Decision")
+    engine = SafetyEngine()
+    engine.register_constraint(BrakingConstraint())
+    engine.register_constraint(FrictionConstraint())
+    engine.register_constraint(LoadConstraint())
+    engine.register_constraint(StabilityConstraint())
 
-        if report.is_safe():
-            st.success("ALLOW: Action is physically feasible.")
-        else:
-            st.error("BLOCK: Physics violation detected.")
+    results = engine.evaluate(world_state)
+    report = SafetyReport(results)
 
-        st.json(report.to_dict())
+    # -------------------------
+    # DECISION
+    # -------------------------
 
-# -----------------------------
-# MODE 2 — IMAGE + ACTION
-# -----------------------------
-elif mode == "Upload Image + Action":
+    st.subheader("Safety Decision")
 
-    st.header("Image-Based Action Audit")
+    if report.is_safe():
+        st.success("ALLOW: Action is physically feasible.")
+    else:
+        st.error("BLOCK: Physics violation detected.")
 
-    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
-    action_text = st.text_area("Describe the AI's proposed action")
+    # -------------------------
+    # HUMAN EXPLANATION
+    # -------------------------
 
-    if uploaded_image:
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+    explanation = []
 
-    if st.button("Audit Action"):
+    for r in report.results:
+        if r.violated:
 
-        st.subheader("Physics Analysis")
+            if r.name == "BrakingFeasibility":
+                explanation.append(
+                    "The robot cannot stop within the available distance."
+                )
 
-        if not action_text:
-            st.warning("Please describe the proposed action.")
-        else:
-            # Simple rule-based analysis demo
-            issues = []
+            if r.name == "FrictionSlipRisk":
+                explanation.append(
+                    "Surface friction is insufficient to counter downhill forces."
+                )
 
-            if "fast" in action_text.lower() or "high speed" in action_text.lower():
-                issues.append("Potential braking feasibility risk.")
+            if r.name == "LoadOverCapacity":
+                explanation.append(
+                    "The load exceeds the robot's rated capacity."
+                )
 
-            if "heavy" in action_text.lower():
-                issues.append("Load stability risk.")
+            if r.name == "TippingRisk":
+                explanation.append(
+                    "The slope exceeds the robot's tipping stability threshold."
+                )
 
-            if "slope" in action_text.lower():
-                issues.append("Slip or tipping risk on incline.")
+    if not explanation:
+        explanation.append("All safety checks passed under current conditions.")
 
-            if issues:
-                st.error("Physics Concerns Detected:")
-                for issue in issues:
-                    st.write(f"- {issue}")
-            else:
-                st.success("No obvious physics violations detected from description.")
+    st.write(" ".join(explanation))
 
-# -----------------------------
-# MODE 3 — VIDEO + ACTION
-# -----------------------------
-elif mode == "Upload Video + Action":
+    # -------------------------
+    # RISK SCORE
+    # -------------------------
 
-    st.header("Video-Based Action Audit")
+    risk_score = sum(50 for r in report.results if r.violated)
+    risk_score = min(risk_score, 100)
 
-    uploaded_video = st.file_uploader("Upload Video", type=["mp4", "mov"])
-    action_text = st.text_area("Describe the AI's proposed action")
+    st.subheader("Risk Score")
+    st.progress(risk_score / 100)
 
-    if uploaded_video:
-        st.video(uploaded_video)
+    # -------------------------
+    # TRAJECTORY GRAPH
+    # -------------------------
 
-    if st.button("Audit Video Action"):
+    required_stop = (velocity ** 2) / (2 * deceleration)
 
-        if not action_text:
-            st.warning("Please describe the proposed action.")
-        else:
-            st.subheader("Physics Risk Assessment")
+    times = [t * 0.1 for t in range(50)]
+    distances = [
+        max(velocity * t - 0.5 * deceleration * t**2, 0) for t in times
+    ]
 
-            risks = []
+    fig, ax = plt.subplots()
+    ax.plot(times, distances)
+    ax.axhline(distance, linestyle="--")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Distance Traveled (m)")
+    ax.set_title("Stopping Trajectory")
 
-            if "corner" in action_text.lower():
-                risks.append("High-speed turning may cause tipping.")
+    st.pyplot(fig)
 
-            if "gap" in action_text.lower():
-                risks.append("Potential terrain traversal failure.")
+    # -------------------------
+    # EXPORT REPORT
+    # -------------------------
 
-            if "overload" in action_text.lower():
-                risks.append("Exceeds load capacity.")
+    report_data = {
+        "timestamp": str(datetime.utcnow()),
+        "robot_profile": profile_name,
+        "inputs": {
+            "velocity": velocity,
+            "distance": distance,
+            "load": load_weight,
+            "friction": friction,
+            "slope": slope,
+        },
+        "violations": [r.name for r in report.results if r.violated],
+    }
 
-            if risks:
-                st.error("Potential Violations:")
-                for r in risks:
-                    st.write(f"- {r}")
-            else:
-                st.success("No major risks detected from description.")
-
-# -----------------------------
-# MODE 4 — TEXT ONLY
-# -----------------------------
-elif mode == "Text Action Audit":
-
-    st.header("Text-Based Physics Audit")
-
-    action_description = st.text_area("Describe the proposed AI action")
-
-    if st.button("Run Audit"):
-
-        if not action_description:
-            st.warning("Please enter an action.")
-        else:
-
-            st.subheader("Physics Analysis")
-
-            # Very simple numeric parser demo
-            import re
-
-            velocity_match = re.search(r"(\d+)\s*m/s", action_description)
-            distance_match = re.search(r"(\d+)\s*m", action_description)
-
-            if velocity_match and distance_match:
-
-                velocity = float(velocity_match.group(1))
-                distance = float(distance_match.group(1))
-
-                agent = Agent(velocity=velocity, max_deceleration=2.0)
-                environment = Environment(distance_to_obstacle=distance)
-                world_state = WorldState(agent, environment)
-
-                engine = SafetyEngine()
-                engine.register_constraint(BrakingConstraint())
-
-                results = engine.evaluate(world_state)
-                report = SafetyReport(results)
-
-                if report.is_safe():
-                    st.success("ALLOW: Physically feasible.")
-                else:
-                    st.error("BLOCK: Insufficient stopping distance.")
-
-                st.json(report.to_dict())
-
-            else:
-                st.info("Could not parse numeric physics parameters. Provide values like '5 m/s' and '3 m'.")
+    st.download_button(
+        label="Download Safety Report (JSON)",
+        data=json.dumps(report_data, indent=4),
+        file_name="safety_report.json",
+        mime="application/json",
+    )

@@ -36,3 +36,7 @@ class AgentState:
     battery_state: float
     current_load: Optional[LoadState]
     contact_points: List[ContactPoint]
+    loadweight: float
+    max_load: float
+    center_of_mass_height: float
+    wheelbase: float
