@@ -1,64 +1,35 @@
-# alignment_core/world_model/agent.py
-
 from dataclasses import dataclass
+from typing import List, Optional
+from .primitives import Vector3, Quaternion, ActuatorLimits
 
 
 @dataclass
 class AgentState:
-    """
-    Represents a physical agent in the world model.
-    Designed for deterministic safety evaluation.
-    """
-
     id: str
-    type: str  # e.g. "mobile", "drone", "vehicle"
+    type: str
 
-    # Core physics
-    mass: float  # kg
-    velocity: float  # m/s
-    position: float  # meters (1D demo position)
+    # Kinematics
+    mass: float
+    position: Vector3
+    velocity: Vector3
+    angular_velocity: Vector3
+    orientation: Quaternion
 
-    # Load & structure
-    load_weight: float  # kg
-    center_of_mass_height: float  # meters
-    wheelbase: float  # meters (distance between wheels)
+    # Geometry / Stability
+    center_of_mass: Vector3
+    center_of_mass_height: float
+    support_polygon: List[Vector3]
+    wheelbase: float
+
+    # Load
+    load_weight: float
+    max_load: float
+
+    # Systems
+    actuator_limits: ActuatorLimits
+    battery_state: float
+    current_load: Optional[float]
+    contact_points: List[Vector3]
 
     def total_mass(self) -> float:
-        """
-        Returns total effective mass including load.
-        """
         return self.mass + self.load_weight
-
-    def kinetic_energy(self) -> float:
-        """
-        Returns kinetic energy in Joules.
-        KE = 1/2 m v^2
-        """
-        return 0.5 * self.total_mass() * (self.velocity ** 2)
-
-    def momentum(self) -> float:
-        """
-        Returns linear momentum (kg·m/s)
-        """
-        return self.total_mass() * self.velocity
-
-    def is_mobile(self) -> bool:
-        return self.type.lower() in ["mobile", "vehicle", "robot"]
-
-    def is_airborne(self) -> bool:
-        return self.type.lower() in ["drone", "uav"]
-
-    def to_dict(self) -> dict:
-        """
-        Useful for debugging or logging.
-        """
-        return {
-            "id": self.id,
-            "type": self.type,
-            "mass": self.mass,
-            "velocity": self.velocity,
-            "position": self.position,
-            "load_weight": self.load_weight,
-            "center_of_mass_height": self.center_of_mass_height,
-            "wheelbase": self.wheelbase,
-        }
