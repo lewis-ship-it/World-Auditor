@@ -7,17 +7,19 @@ class StabilityConstraint(Constraint):
 
     def evaluate(self, world_state):
         results = []
-        # FIX: world_state.agents is a list. We must iterate or select the target agent.
+        # FIX: Explicitly iterate through the list of agents [cite: 142]
         for agent in world_state.agents:
             env = world_state.environment
             slope = env.slope
             
-            # Access attributes from the individual agent object
             center_height = agent.center_of_mass_height
             wheelbase = agent.wheelbase
 
-            # Safety calculation for tipping angle
-            tipping_angle = math.degrees(math.atan((wheelbase / 2) / center_height))
+            # Calculate tipping threshold (Center of Mass vs Support Polygon)
+            if center_height > 0:
+                tipping_angle = math.degrees(math.atan((wheelbase / 2) / center_height))
+            else:
+                tipping_angle = 90.0
 
             violated = slope > tipping_angle
 
@@ -29,9 +31,7 @@ class StabilityConstraint(Constraint):
                     "agent_id": agent.id,
                     "slope": slope,
                     "tipping_threshold": tipping_angle,
+                    "margin": tipping_angle - slope
                 },
             ))
-        
-        # Ensure it returns a list if the engine expects extension, 
-        # or a single result if that is the standard.
         return results
