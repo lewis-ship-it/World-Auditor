@@ -1,32 +1,24 @@
+from .base import Constraint, ConstraintResult
 import math
-from ..engine.constraint import ConstraintResult
 
-class FrictionConstraint:
+class FrictionConstraint(Constraint):
+    name = "TractionCheck"
+    severity = "medium"
 
     def evaluate(self, world_state):
         results = []
-
-        g = abs(world_state.gravity.z)
-
+        env = world_state.environment
+        
+        # LIST-SAFE PATTERN: Iterate through agents
         for agent in world_state.agents:
+            friction_coeff = env.friction
+            # Simple check: if friction is dangerously low (like ice)
+            violated = friction_coeff < 0.2 
 
-            v = agent.velocity.x
-            friction = world_state.environment.friction
-
-            # max friction force
-            max_friction_force = friction * agent.total_mass() * g
-
-            # required centripetal force (simple slip heuristic)
-            required_force = agent.total_mass() * abs(v)
-
-            violated = required_force > max_friction_force
-
-            results.append(
-                ConstraintResult(
-                    name="Friction",
-                    violated=violated,
-                    message=f"Required force {required_force:.2f}N / Max friction {max_friction_force:.2f}N"
-                )
-            )
-
+            results.append(ConstraintResult(
+                self.name,
+                violated,
+                self.severity,
+                {"effective_friction": friction_coeff}
+            ))
         return results

@@ -7,16 +7,14 @@ class StabilityConstraint(Constraint):
 
     def evaluate(self, world_state):
         results = []
-        # FIX: Explicitly loop through agents to avoid 'list' attribute error
+        env = world_state.environment
+        
+        # LIST-SAFE PATTERN: Iterate through agents
         for agent in world_state.agents:
-            env = world_state.environment
-            
-            # Using getattr to safely handle the slope parameter
-            slope = getattr(env, "slope", 0.0)
+            slope = env.slope
             center_height = agent.center_of_mass_height
             wheelbase = agent.wheelbase
 
-            # Tipping physics: critical angle when CoM moves outside wheelbase
             # 
             if center_height > 0:
                 tipping_angle = math.degrees(math.atan((wheelbase / 2) / center_height))

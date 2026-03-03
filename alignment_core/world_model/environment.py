@@ -7,7 +7,7 @@ class EnvironmentState:
     air_density: float
     wind_vector: Vector3
     terrain_type: str
-    friction: float              # Matches app.py logic
-    slope: float                 # Matches app.py logic
+    friction: float              # Standardized from app.py
+    slope: float                 # Standardized from app.py
     lighting_conditions: str
-    distance_to_obstacles: float # Standardized to plural
+    distance_to_obstacles: float # Standardized (plural) to match app.py
