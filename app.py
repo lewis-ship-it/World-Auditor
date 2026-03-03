@@ -22,7 +22,7 @@ from alignment_core.world_model.primitives import Vector3, Quaternion, ActuatorL
 from alignment_core.world_model.uncertainty import UncertaintyModel
 
 # -------------------------
-# 2. CONFIGURATION & STYLING (Restored Full Block)
+# 2. CONFIGURATION & STYLING
 # -------------------------
 st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
 
@@ -39,14 +39,6 @@ st.markdown("""
 
 st.title("🛡️ SafeBot: Physics Reality Auditor")
 
-# --- SYSTEM DESCRIPTION ---
-with st.expander("📖 System Overview", expanded=False):
-    st.markdown("""
-    **SafeBot** is a deterministic safety layer for autonomous robots.
-    * **Perception:** Tracks intended velocity and obstacle distance.
-    * **Physics Audit:** Validates intent against stopping, tipping, and load.
-    """)
-
 # -------------------------
 # 3. SIDEBAR & PARAMETERS
 # -------------------------
@@ -62,19 +54,22 @@ BRAKE_MAP = {"New": 5.0, "Used": 2.5, "Failing": 1.0}
 with st.sidebar:
     st.header("⚙️ Audit Parameters")
     audit_mode = st.radio("Mode", ["Manual Simulator", "Live Video Audit"])
+    
     st.divider()
     profile_name = st.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
     profile = ROBOT_PROFILES[profile_name]
+    
     surface_key = st.selectbox("Surface Type", list(SURFACE_MAP.keys()))
     base_friction = st.slider("Specific Friction (μ)", 0.05, 1.0, SURFACE_MAP[surface_key])
+    
     brake_key = st.select_slider("Brake Health", options=list(BRAKE_MAP.keys()), value="Used")
     deceleration = BRAKE_MAP[brake_key]
-    
+
     velocity, distance = 5.0, 10.0
     if audit_mode == "Manual Simulator":
         velocity = st.slider("Velocity (m/s)", 0.0, 25.0, 5.0)
         distance = st.slider("Distance to Hazard (m)", 0.5, 40.0, 10.0)
-    
+
     load_weight = st.slider("Current Load (kg)", 0.0, 3000.0, 500.0)
     slope = st.slider("Slope Angle (deg)", -25.0, 45.0, 0.0)
     latency = st.slider("System Latency (s)", 0.0, 1.5, 0.2)
@@ -107,7 +102,24 @@ def run_audit(p_data, v, d, decel, load, friction, slp):
     return SafetyReport(engine.evaluate(world_state)), eff_fric
 
 # -------------------------
-# 5. ANIMATED SIMULATION & VERDICT
+# 5. LIVE VIDEO MODULE (RESTORED)
+# -------------------------
+if audit_mode == "Live Video Audit":
+    st.subheader("📹 Perception Analysis")
+    uploaded_video = st.file_uploader("Upload Stream", type=["mp4", "mov"])
+    if uploaded_video:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_video.read())
+        cap = cv2.VideoCapture(tfile.name)
+        ret, frame = cap.read()
+        if ret:
+            st.image(frame, channels="BGR", use_container_width=True)
+            velocity, distance = 8.4, 12.2 # Mock extraction
+            st.success(f"Tracking: {velocity}m/s | {distance}m to wall")
+        cap.release()
+
+# -------------------------
+# 6. REAL-TIME SIMULATION
 # -------------------------
 report, final_friction = run_audit(profile, velocity, distance, deceleration, load_weight, base_friction, slope)
 
@@ -116,71 +128,73 @@ if report.is_safe():
 else:
     st.markdown('<div class="status-box danger-glow"><h1>❌ PHYSICS VETO</h1></div>', unsafe_allow_html=True)
 
-st.subheader("🏁 Live Kinematic Runway")
+st.subheader("🏁 Real-Time Physics Runway")
 sim_container = st.empty()
-run_sim = st.button("▶️ Run Mission Simulation")
+run_sim = st.button("▶️ Start Real-Time Mission")
 
-def draw_frame(current_pos):
+def draw_world(current_pos):
     s_rad = math.radians(slope)
-    t_dist = velocity * latency + (velocity**2 / (2 * deceleration))
+    think_d = velocity * latency
+    stop_d_mech = (velocity**2 / (2 * deceleration)) if deceleration > 0 else 0
+    total_stop = think_d + stop_d_mech
+    
     fig = go.Figure()
-    m_x = max(distance, t_dist) + 10
+    m_x = max(distance, total_stop) + 10
     
     # Ground & Wall
     fig.add_trace(go.Scatter(x=[0, m_x*math.cos(s_rad)], y=[0, m_x*math.sin(s_rad)], mode='lines', line=dict(color="#30363D", width=4)))
     wx, wy = distance*math.cos(s_rad), distance*math.sin(s_rad)
-    fig.add_trace(go.Scatter(x=[wx-1.5*math.sin(s_rad), wx+1.5*math.sin(s_rad)], y=[wy+1.5*math.cos(s_rad), wy-1.5*math.cos(s_rad)], 
-                             mode='lines', line=dict(color="#EF553B" if t_dist >= distance else "#00CC96", width=10)))
+    fig.add_trace(go.Scatter(x=[wx-1.2*math.sin(s_rad), wx+1.2*math.sin(s_rad)], y=[wy+1.2*math.cos(s_rad), wy-1.2*math.cos(s_rad)], 
+                             mode='lines', line=dict(color="#EF553B" if total_stop >= distance else "#00CC96", width=8)))
     
-    # Robot & Vector
+    # Static Shadows (Ghost)
+    off = 0.8
+    fig.add_trace(go.Scatter(x=[0, think_d*math.cos(s_rad)], y=[off, think_d*math.sin(s_rad)+off], mode='lines', line=dict(color="#FFD700", width=8), opacity=0.3))
+    
+    # Robot
     rx, ry = current_pos*math.cos(s_rad), current_pos*math.sin(s_rad)
-    vx, vy = rx + (velocity*0.15)*math.cos(s_rad), ry + (velocity*0.15)*math.sin(s_rad) - 2.0
-    fig.add_trace(go.Scatter(x=[rx, vx], y=[ry, vy], mode='lines+markers', line=dict(color="#00D4FF", dash="dot")))
+    vx, vy = rx + (velocity*0.12)*math.cos(s_rad), ry + (velocity*0.12)*math.sin(s_rad) - 1.8
+    fig.add_trace(go.Scatter(x=[rx, vx], y=[ry, vy], mode='lines', line=dict(color="#00D4FF", dash="dot")))
     fig.add_trace(go.Scatter(x=[rx], y=[ry], mode='markers', marker=dict(size=25, color="white", symbol="square")))
     
     fig.update_layout(height=400, showlegend=False, margin=dict(l=0,r=0,t=0,b=0),
-                      xaxis=dict(range=[-5, m_x], showgrid=False, zeroline=False), yaxis=dict(range=[-8, 8], showgrid=False))
+                      xaxis=dict(range=[-5, m_x], showgrid=False, zeroline=False), yaxis=dict(range=[-10, 10], showgrid=False))
     return fig
 
-if not run_sim:
-    sim_container.plotly_chart(draw_frame(0), use_container_width=True)
+if run_sim:
+    start_t = time.time()
+    t_stop_total = velocity * latency + (velocity**2 / (2 * deceleration))
+    while True:
+        elapsed = time.time() - start_t
+        curr_p = velocity * elapsed
+        sim_container.plotly_chart(draw_world(curr_p), use_container_width=True)
+        if curr_p >= distance or curr_p >= t_stop_total: break
+        time.sleep(0.01)
 else:
-    t_dist = velocity * latency + (velocity**2 / (2 * deceleration))
-    for i in range(26):
-        curr = (t_dist / 25) * i
-        sim_container.plotly_chart(draw_frame(curr), use_container_width=True)
-        time.sleep(0.04)
-        if curr >= distance: break
+    sim_container.plotly_chart(draw_world(0), use_container_width=True)
 
 # -------------------------
-# 6. RESTORED HEATMAP & MONTE CARLO
+# 7. ANALYSIS & HEATMAP (RESTORED)
 # -------------------------
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Stop Distance", f"{velocity*latency + (velocity**2/(2*deceleration)):.1f}m")
-m2.metric("Impact Speed", f"{max(0, (velocity - distance*0.5)):.1f}m/s" if total_d > distance else "0")
-m3.metric("Effective Grip", f"{final_friction:.2f}")
-m4.metric("Risk", f"{report.risk_score()}")
-
 st.divider()
+col1, col2, col3 = st.columns([1, 1, 2])
 
-col_a, col_b = st.columns(2)
-
-with col_a:
+with col1:
     st.subheader("🎲 Monte Carlo Stress Test")
-    st.info("The Monte Carlo method simulates 100 'uncertain' variations of the current environment (tweaking friction and slope) to calculate the statistical probability of success.")
-    passes = 0
-    for _ in range(100):
-        t_f, t_s = base_friction * random.uniform(0.9, 1.1), slope + random.uniform(-2, 2)
-        r, _ = run_audit(profile, velocity, distance, deceleration, load_weight, t_f, t_s)
-        if r.is_safe(): passes += 1
-    rel = (passes/100)*100
-    st.progress(rel/100)
-    st.write(f"**Reliability Score:** {rel}%")
+    st.caption("Testing 100 variations of environment ±10%.")
+    passes = sum(1 for _ in range(100) if run_audit(profile, velocity, distance, deceleration, load_weight, base_friction * random.uniform(0.9, 1.1), slope + random.uniform(-2, 2))[0].is_safe())
+    st.metric("Reliability Score", f"{passes}%")
+    st.progress(passes/100)
 
-with col_b:
+with col2:
+    st.subheader("📊 Physics Metrics")
+    st.metric("Risk Score", f"{report.risk_score()}")
+    if not report.is_safe():
+        for res in report.results:
+            if res.violated: st.warning(f"⚠️ {res.name}")
+
+with col3:
     st.subheader("🔍 Safety Envelope")
     v_ax, d_ax = np.linspace(0, 25, 15), np.linspace(1, 40, 15)
     grid = [[1 if run_audit(profile, vi, dj, deceleration, load_weight, base_friction, slope)[0].is_safe() else 0 for dj in d_ax] for vi in v_ax]
-    fig_h = go.Figure(data=go.Heatmap(z=grid, x=d_ax, y=v_ax, colorscale=[[0,'#EF553B'],[1,'#00CC96']], showscale=False))
-    fig_h.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), xaxis_title="Dist", yaxis_title="Vel")
-    st.plotly_chart(fig_h, use_container_width=True)
+    st.plotly_chart(go.Figure(data=go.Heatmap(z=grid, x=d_ax, y=v_ax, colorscale=[[0,'#EF553B'],[1,'#00CC96']], showscale=False)).update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), xaxis_title="Distance", yaxis_title="Velocity"), use_container_width=True)
