@@ -1,6 +1,5 @@
 import streamlit as st
 import math
-import random
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
@@ -25,7 +24,6 @@ from alignment_core.world_model.uncertainty import UncertaintyModel
 # -------------------------
 st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
 
-# Modern "Control Center" Styling
 st.markdown("""
     <style>
     .main { background-color: #0E1117; color: #FFFFFF; }
@@ -39,14 +37,11 @@ st.markdown("""
 st.title("🛡️ SafeBot: Physics Reality Auditor")
 
 # --- BRIEF SYSTEM DESCRIPTION ---
-with st.expander("📖 System Overview: What does this app do?", expanded=True):
+with st.expander("📖 System Overview", expanded=False):
     st.markdown("""
-    **SafeBot** serves as a deterministic safety gate between AI robotic intent and real-world execution.
-    
-    * **📹 Video Perception Side:** This module processes visual streams to detect the robot's current speed and distance to obstacles. It represents the 'Observed Reality'.
-    * **⚖️ Physics Side:** This module subjects the observed reality to hard physical constraints—such as stopping distance, tipping angles, and friction limits.
-    
-    If the laws of physics dictate that a maneuver is impossible (e.g., the robot cannot stop before a collision), the system issues a **Physics Veto**.
+    **SafeBot** is a deterministic safety layer for autonomous systems.
+    * **📹 Video Perception:** Extracts speed and hazard distance from footage. [cite: 96, 108]
+    * **⚖️ Physics Audit:** Validates intent against stopping distance, tipping, and load limits. [cite: 112, 124, 143]
     """)
 
 ROBOT_PROFILES = {
@@ -69,9 +64,8 @@ with st.sidebar:
     profile_name = st.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
     profile = ROBOT_PROFILES[profile_name]
     
-    surface_key = st.selectbox("Surface Type (Preset)", list(SURFACE_MAP.keys()))
-    # Keep numerical specifics as requested
-    base_friction = st.slider("Specific Friction (μ)", 0.05, 1.0, SURFACE_MAP[surface_key])
+    surface_key = st.selectbox("Surface Type", list(SURFACE_MAP.keys()))
+    base_friction = st.slider("Surface Friction (μ)", 0.05, 1.0, SURFACE_MAP[surface_key])
     
     brake_key = st.select_slider("Brake Health", options=list(BRAKE_MAP.keys()), value="Used")
     deceleration = BRAKE_MAP[brake_key]
@@ -82,38 +76,32 @@ with st.sidebar:
         distance = st.slider("Distance to Hazard (m)", 0.5, 40.0, 10.0)
 
     load_weight = st.slider("Current Load (kg)", 0.0, 3000.0, 500.0)
-    slope = st.slider("Slope Angle (deg)", 0.0, 45.0, 5.0)
+    slope = st.slider("Slope Angle (deg)", -25.0, 45.0, 0.0)
+    latency = st.slider("System Latency (s)", 0.0, 1.5, 0.2)
 
 # -------------------------
 # 4. CORE AUDIT LOGIC 
 # -------------------------
 def run_audit(p_data, v, d, decel, load, friction, slp):
-    reduction = min(v * 0.012, 0.35)
-    eff_fric = max(friction - reduction, 0.05)
+    # Standard effective friction calculation
+    eff_fric = max(friction - min(v * 0.012, 0.35), 0.05)
     
-    zero = Vector3(0.0, 0.0, 0.0)
-    identity = Quaternion(1.0, 0.0, 0.0, 0.0)
     limits = ActuatorLimits(100.0, 10000.0, 25.0, float(decel))
-
     agent_obj = AgentState(
-        id="robot_01", type="mobile", mass=float(p_data["mass"]), position=zero,
-        velocity=Vector3(float(v), 0.0, 0.0), angular_velocity=zero, orientation=identity,
-        center_of_mass=zero, center_of_mass_height=float(p_data["com_height"]),
-        support_polygon=[Vector3(-0.5, -0.5, 0), Vector3(0.5, 0.5, 0)],
+        id="robot_01", type="mobile", mass=float(p_data["mass"]), position=Vector3(0,0,0),
+        velocity=Vector3(float(v), 0.0, 0.0), angular_velocity=Vector3(0,0,0), orientation=Quaternion(1,0,0,0),
+        center_of_mass=Vector3(0,0,0), center_of_mass_height=float(p_data["com_height"]),
+        support_polygon=[Vector3(-0.5,-0.5,0), Vector3(0.5,0.5,0)],
         wheelbase=float(p_data["wheelbase"]), load_weight=float(load), max_load=float(p_data["max_load"]),
         actuator_limits=limits, battery_state=1.0, current_load=None, contact_points=[]
     )
-
     env_obj = EnvironmentState(
-        temperature=20.0, air_density=1.225, wind_vector=zero, terrain_type="flat",
-        friction=float(eff_fric), slope=float(slp),
-        lighting_conditions="normal", distance_to_obstacles=float(d)
+        temperature=20.0, air_density=1.225, wind_vector=Vector3(0,0,0), terrain_type="flat",
+        friction=float(eff_fric), slope=float(slp), lighting_conditions="normal", distance_to_obstacles=float(d)
     )
-
     world_state = WorldState(
         timestamp=datetime.now().timestamp(), delta_time=0.1, gravity=Vector3(0,0,-9.81),
-        environment=env_obj, agents=[agent_obj], objects=[], 
-        uncertainty=UncertaintyModel(0.05,0.05,0.05,0.05)
+        environment=env_obj, agents=[agent_obj], objects=[], uncertainty=UncertaintyModel(0.05,0.05,0.05,0.05)
     )
 
     engine = SafetyEngine()
@@ -123,73 +111,114 @@ def run_audit(p_data, v, d, decel, load, friction, slp):
     return SafetyReport(engine.evaluate(world_state)), eff_fric
 
 # -------------------------
-# 5. LIVE VIDEO LOGIC
-# -------------------------
-if audit_mode == "Live Video Audit":
-    st.subheader("📹 Perception Stream Analysis")
-    uploaded_video = st.file_uploader("Upload Stream", type=["mp4", "mov"])
-    if uploaded_video:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_video.read())
-        cap = cv2.VideoCapture(tfile.name)
-        ret, frame = cap.read()
-        if ret:
-            st.image(frame, channels="BGR", use_container_width=True)
-            velocity, distance = 9.2, 14.5 # Simulated Perception Data
-            st.success(f"Tracking Data Locked: {velocity}m/s | {distance}m to target")
-        cap.release()
-
-# -------------------------
-# 6. VERDICT & METRICS
+# 5. VERDICT & PHYSICS RUNWAY
 # -------------------------
 report, final_friction = run_audit(profile, velocity, distance, deceleration, load_weight, base_friction, slope)
 
-# TRAFFIC LIGHT VERDICT SYSTEM
+# VERDICT HEADER
 if report.is_safe():
-    st.markdown('<div class="status-box safe-glow"><h1>✅ MISSION CAPABLE</h1><p>Physics audit passed. All constraints within safe operational limits.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-box safe-glow"><h1>✅ MISSION CAPABLE</h1></div>', unsafe_allow_html=True)
 else:
-    st.markdown('<div class="status-box danger-glow"><h1>❌ PHYSICS VETO DETECTED</h1><p>Action blocked. The intended maneuver violates fundamental safety laws.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-box danger-glow"><h1>❌ PHYSICS VETO</h1></div>', unsafe_allow_html=True)
 
-# PLAIN ENGLISH ANALYST INSIGHTS
+# THE INTERACTIVE RUNWAY SIMULATION
+st.subheader("🏁 Kinematic Runway & Stability Vector")
+
+# Calculations for Simulation
+thinking_dist = velocity * latency
+stopping_dist_mech = (velocity ** 2) / (2 * deceleration) if deceleration > 0 else 0
+total_stop_dist = thinking_dist + stopping_dist_mech
+ghost_dist = velocity * 1.5 # 1.5s projection
+slope_rad = math.radians(slope)
+
+# Determine collision
+is_collision = total_stop_dist >= distance
+sim_color = "#EF553B" if is_collision else "#00CC96"
+
+fig_sim = go.Figure()
+
+# 1. Slope-Adaptive Path
+path_length = max(distance + 5, total_stop_dist + 5)
+x_path = [0, path_length * math.cos(slope_rad)]
+y_path = [0, path_length * math.sin(slope_rad)]
+fig_sim.add_trace(go.Scatter(x=x_path, y=y_path, mode='lines', line=dict(color="#30363D", width=4)))
+
+# 2. The Wall (Obstacle)
+wall_x = distance * math.cos(slope_rad)
+wall_y = distance * math.sin(slope_rad)
+# Perpendicular wall line
+fig_sim.add_shape(type="line", x0=wall_x - math.sin(slope_rad), y0=wall_y + math.cos(slope_rad), 
+                  x1=wall_x + math.sin(slope_rad), y1=wall_y - math.cos(slope_rad), 
+                  line=dict(color=sim_color, width=8))
+
+# 3. Stopping Buffers (Thinking vs Braking)
+think_x = thinking_dist * math.cos(slope_rad)
+think_y = thinking_dist * math.sin(slope_rad)
+fig_sim.add_trace(go.Scatter(x=[0, think_x], y=[0.2, think_y + 0.2], mode='lines', 
+                             line=dict(color="#FFD700", width=15), opacity=0.4, name="Thinking Time"))
+fig_sim.add_trace(go.Scatter(x=[think_x, total_stop_dist * math.cos(slope_rad)], 
+                             y=[think_y + 0.2, (total_stop_dist * math.sin(slope_rad)) + 0.2], 
+                             mode='lines', line=dict(color=sim_color, width=15), opacity=0.4, name="Mechanical Braking"))
+
+# 4. The Ghost Dot (Projected Future)
+ghost_x = ghost_dist * math.cos(slope_rad)
+ghost_y = ghost_dist * math.sin(slope_rad)
+fig_sim.add_trace(go.Scatter(x=[ghost_x], y=[ghost_y], mode='markers', 
+                             marker=dict(size=15, color="white", opacity=0.3, symbol="circle"), name="Ghost Projection"))
+
+# 5. Stability Vector (Center of Mass)
+# Resultant vector of gravity and inertia
+inertia_force = velocity * 0.5 # Simplified visual scale
+resultant_x = 0 + (inertia_force * math.cos(slope_rad))
+resultant_y = 1 - (9.81 * 0.1) # Gravity pull
+fig_sim.add_trace(go.Scatter(x=[0, resultant_x], y=[0, resultant_y], mode='lines+markers', 
+                             line=dict(color="#00D4FF", width=3, dash="dot"), name="Stability Vector"))
+
+# 6. The Robot (Dot)
+fig_sim.add_trace(go.Scatter(x=[0], y=[0], mode='markers+text', 
+                             marker=dict(size=25, color="white", symbol="square"),
+                             text=["ROBOT"], textposition="bottom center"))
+
+fig_sim.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), showlegend=True,
+                      xaxis=dict(showgrid=False, zeroline=False), yaxis=dict(showgrid=False, zeroline=False),
+                      paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
+
+st.plotly_chart(fig_sim, use_container_width=True)
+
+# Metrics Dashboard
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Stopping Distance", f"{total_stop_dist:.2f}m", delta=f"{distance - total_stop_dist:.1f}m Margin")
+col2.metric("Grip (μ)", f"{final_friction:.2f}")
+col3.metric("Brake Force", f"{deceleration}m/s²")
+col4.metric("Risk Score", f"{report.risk_score()}", delta="High Risk" if not report.is_safe() else "Normal", delta_color="inverse")
+
+# -------------------------
+# 6. ANALYST INSIGHTS & LOGS
+# -------------------------
 if not report.is_safe():
     with st.container():
         st.error("### 🧠 Safety Analyst Insight")
         for res in report.results:
             if res.violated:
                 if "Braking" in res.name:
-                    st.write(f"⚠️ **Braking Risk:** At current speed ({velocity}m/s), the robot cannot stop within the available {distance}m.")
+                    st.write(f"⚠️ **Kinematic Conflict:** At {velocity}m/s, your 'Thinking Distance' alone is {thinking_dist:.1f}m. You will hit the obstacle before the brakes even lock.") [cite: 115, 116]
                 if "Tipping" in res.name or "Stability" in res.name:
-                    st.write(f"⚠️ **Instability:** The current slope angle ({slope}°) will cause the robot to tip over.")
-                if "Load" in res.name:
-                    st.write(f"⚠️ **Overload:** The cargo weight ({load_weight}kg) exceeds the rated capacity for this chassis.")
-
-col1, col2, col3, col4 = st.columns(4)
-risk = sum(25 for r in report.results if r.violated)
-col1.metric("Risk Level", f"{risk}%", delta="Critical" if risk > 50 else "Safe", delta_color="inverse")
-col2.metric("Effective Grip", f"{final_friction:.2f}")
-col3.metric("Brake Capacity", f"{deceleration}m/s²")
-col4.metric("Total Mass", f"{profile['mass'] + load_weight}kg")
-
-# Stopping Distance Visualization
-
-stop_dist = (velocity ** 2) / (2 * deceleration) if deceleration > 0 else 0
-margin = distance - stop_dist
-
-fig = go.Figure()
-fig.add_trace(go.Bar(y=["Path"], x=[stop_dist], name="Stopping", orientation='h', marker_color='#EF553B'))
-if margin > 0:
-    fig.add_trace(go.Bar(y=["Path"], x=[margin], name="Margin", orientation='h', marker_color='#00CC96'))
-fig.update_layout(height=180, barmode='stack', margin=dict(l=0, r=0, t=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-st.plotly_chart(fig, use_container_width=True)
+                    st.write(f"⚠️ **Instability:** The {slope}° slope exceeds the tipping threshold for a {profile_name}.") [cite: 124, 143]
 
 # -------------------------
-# 7. SAFETY HEATMAP
+# 7. MONTE CARLO STRESS TEST (NEW)
 # -------------------------
-with st.expander("🔍 Predictive Safety Envelope", expanded=True):
-    v_axis = np.linspace(0, 25, 20)
-    d_axis = np.linspace(1, 40, 20)
-    grid = [[0 if run_audit(profile, vi, dj, deceleration, load_weight, base_friction, slope)[0].is_safe() else 1 for dj in d_axis] for vi in v_axis]
-
-    heatmap = go.Figure(data=go.Heatmap(z=grid, x=d_axis, y=v_axis, colorscale=[[0, '#00CC96'], [1, '#EF553B']], showscale=False))
-    heatmap.update_layout(xaxis_title="Distance (m)", yaxis_title="Velocity (m/s)", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-    st.plotly_chart(heatmap, use_container_width=True)
+with st.expander("🎲 Monte Carlo Environmental Stress Test", expanded=False):
+    st.write("Running 50 simulations with ±10% variation in friction and slope...")
+    passes = 0
+    for _ in range(50):
+        test_fric = base_friction * random.uniform(0.9, 1.1)
+        test_slope = slope + random.uniform(-2, 2)
+        sim_report, _ = run_audit(profile, velocity, distance, deceleration, load_weight, test_fric, test_slope)
+        if sim_report.is_safe(): passes += 1
+    
+    reliability = (passes / 50) * 100
+    st.progress(reliability / 100)
+    st.write(f"**Environmental Reliability:** {reliability}%")
+    if reliability < 100:
+        st.warning("Mission is vulnerable to small environmental changes (e.g. wet patches or uneven ground).")
