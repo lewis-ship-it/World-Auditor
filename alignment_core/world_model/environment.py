@@ -5,14 +5,14 @@ from .primitives import Vector3
 class EnvironmentState:
     # Physical conditions
     temperature: float
-    air_density: float        # Added to match app.py
-    wind_vector: Vector3      # Added to match app.py
-    terrain_type: str         # Added to match app.py
-    surface_friction: float
-    slope: float              # Renamed from slope_angle to match app.py usage
+    air_density: float
+    wind_vector: Vector3
+    terrain_type: str
+    friction: float  # Changed from surface_friction to friction
+    slope: float
 
     # Context
-    lighting_conditions: str  # Renamed to be more descriptive
+    lighting_conditions: str
 
     # Risk modeling
     distance_to_obstacles: float
