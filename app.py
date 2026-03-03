@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 import tempfile
 
-# --- 1. CORE IMPORTS ---
+# --- 1. CORE ENGINE & MODEL IMPORTS ---
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.engine.report import SafetyReport
 from alignment_core.constraints.braking import BrakingConstraint
@@ -21,10 +21,20 @@ from alignment_core.world_model.primitives import Vector3, Quaternion, ActuatorL
 from alignment_core.world_model.uncertainty import UncertaintyModel
 
 # -------------------------
-# 2. CONFIG & PROFILES
+# 2. CONFIGURATION & PROFILES 
 # -------------------------
 st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
+
+# Aesthetic Header with Custom CSS
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("🛡️ SafeBot: Physics Reality Auditor")
+st.caption("Deterministic Safety Middleware for AI-Controlled Robotics Systems")
 
 ROBOT_PROFILES = {
     "Warehouse Forklift": {"mass": 4000.0, "max_load": 2000.0, "com_height": 1.2, "wheelbase": 2.0},
@@ -36,93 +46,62 @@ SURFACE_MAP = {"Dry Concrete": 0.8, "Wet Asphalt": 0.4, "Ice": 0.15}
 BRAKE_MAP = {"New": 5.0, "Used": 2.5, "Failing": 1.0}
 
 # -------------------------
-# 3. SIDEBAR CONTROLS
+# 3. SIDEBAR CONTROLS 
 # -------------------------
-st.sidebar.header("Audit Controls")
-audit_mode = st.sidebar.radio("Mode", ["Manual Simulator", "Live Video Audit"])
+with st.sidebar:
+    st.header("⚙️ Audit Configuration")
+    audit_mode = st.radio("Primary Mode", ["Manual Simulator", "Live Video Audit"])
+    
+    st.divider()
+    profile_name = st.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
+    profile = ROBOT_PROFILES[profile_name]
+    
+    surface_key = st.selectbox("Environmental Surface", list(SURFACE_MAP.keys()))
+    base_friction = SURFACE_MAP[surface_key]
+    
+    brake_key = st.select_slider("Mechanical Brake Condition", options=list(BRAKE_MAP.keys()), value="Used")
+    deceleration = BRAKE_MAP[brake_key]
 
-profile_name = st.sidebar.selectbox("Robot Profile", list(ROBOT_PROFILES.keys()))
-profile = ROBOT_PROFILES[profile_name]
+    # Initialize defaults
+    velocity, distance = 5.0, 10.0
+    
+    if audit_mode == "Manual Simulator":
+        velocity = st.slider("Velocity (m/s)", 0.0, 20.0, 5.0)
+        distance = st.slider("Obstacle Distance (m)", 0.5, 30.0, 10.0)
 
-surface_key = st.sidebar.selectbox("Surface", list(SURFACE_MAP.keys()))
-base_friction = SURFACE_MAP[surface_key]
-
-brake_key = st.sidebar.select_slider("Brake Condition", options=list(BRAKE_MAP.keys()), value="Used")
-deceleration = BRAKE_MAP[brake_key]
-
-# Initialize defaults
-velocity = 5.0
-distance = 10.0
-
-if audit_mode == "Manual Simulator":
-    velocity = st.sidebar.slider("Speed (m/s)", 0.0, 20.0, 5.0)
-    distance = st.sidebar.slider("Distance to Obstacle (m)", 0.5, 30.0, 10.0)
-
-load_weight = st.sidebar.slider("Load Weight (kg)", 0.0, 3000.0, 500.0)
-slope = st.sidebar.slider("Slope (degrees)", 0.0, 45.0, 5.0)
+    load_weight = st.slider("Current Load (kg)", 0.0, 3000.0, 500.0)
+    slope = st.slider("Terrain Slope (deg)", 0.0, 45.0, 5.0)
 
 # -------------------------
-# 4. CORE AUDIT LOGIC
+# 4. CORE AUDIT LOGIC 
 # -------------------------
 def run_audit(p_data, v, d, decel, load, friction, slp):
-    # Dynamic Friction Model
-    reduction = min(v * 0.01, 0.3)
-    effective_friction = max(friction - reduction, 0.05)
-
+    # Dynamic Friction Model: Speed reduces effective grip 
+    effective_friction = max(friction - min(v * 0.01, 0.3), 0.05)
     zero = Vector3(0.0, 0.0, 0.0)
-    identity = Quaternion(1.0, 0.0, 0.0, 0.0)
     
-    limits = ActuatorLimits(
-        max_torque=100.0,
-        max_force=10000.0,
-        max_speed=20.0,
-        max_acceleration=decel
-    )
-
-    # Realigned AgentState
     agent = AgentState(
-        id="robot",
-        type="mobile",
-        mass=p_data["mass"],
-        position=zero,
-        velocity=Vector3(v, 0.0, 0.0),
-        angular_velocity=zero,
-        orientation=identity,
-        center_of_mass=zero,
-        center_of_mass_height=p_data["com_height"],
+        id="primary_robot", type="mobile", mass=float(p_data["mass"]), position=zero,
+        velocity=Vector3(float(v), 0.0, 0.0), angular_velocity=zero, orientation=Quaternion(1,0,0,0),
+        center_of_mass=zero, center_of_mass_height=float(p_data["com_height"]),
         support_polygon=[Vector3(-0.5, -0.5, 0), Vector3(0.5, 0.5, 0)],
-        wheelbase=p_data["wheelbase"],
-        load_weight=load,
-        max_load=p_data["max_load"],
-        actuator_limits=limits,
-        battery_state=1.0,
-        current_load=None,
-        contact_points=[]
+        wheelbase=float(p_data["wheelbase"]), load_weight=float(load), max_load=float(p_data["max_load"]),
+        actuator_limits=ActuatorLimits(100.0, 10000.0, 20.0, float(decel)),
+        battery_state=1.0, current_load=None, contact_points=[]
     )
 
-    # Standardized EnvironmentState
     env = EnvironmentState(
-        temperature=20.0,
-        air_density=1.225,
-        wind_vector=zero,
-        terrain_type="flat",
-        friction=float(effective_friction), # Fixed: Correct attribute name for BrakingConstraint
-        slope=float(slp),
-        lighting_conditions="normal",
-        distance_to_obstacles=float(d)
+        temperature=20.0, air_density=1.225, wind_vector=zero, terrain_type="flat",
+        friction=float(effective_friction), slope=float(slp),
+        lighting_conditions="normal", distance_to_obstacles=float(d)
     )
 
     world_state = WorldState(
-        timestamp=datetime.now().timestamp(),
-        delta_time=0.1,
-        gravity=Vector3(0, 0, -9.81),
-        environment=env,
-        agents=[agent],
-        objects=[],
-        uncertainty=UncertaintyModel(0.05, 0.05, 0.05, 0.05)
+        timestamp=datetime.now().timestamp(), delta_time=0.1, gravity=Vector3(0,0,-9.81),
+        environment=env, agents=[agent], objects=[], uncertainty=UncertaintyModel(0.05,0.05,0.05,0.05)
     )
     
-    # Bridge for constraints expecting singular .agent
+    # Bridge for constraints 
     world_state.agent = agent 
 
     engine = SafetyEngine()
@@ -132,10 +111,11 @@ def run_audit(p_data, v, d, decel, load, friction, slp):
     return SafetyReport(engine.evaluate(world_state)), effective_friction
 
 # -------------------------
-# 5. VIDEO PROCESSING
+# 5. VIDEO AUDIT 
 # -------------------------
 if audit_mode == "Live Video Audit":
-    uploaded_video = st.file_uploader("Upload Audit Video", type=["mp4", "mov"])
+    st.subheader("📸 Computer Vision Perception Sync")
+    uploaded_video = st.file_uploader("Upload Audit Stream", type=["mp4", "mov"])
     if uploaded_video:
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_video.read())
@@ -143,51 +123,60 @@ if audit_mode == "Live Video Audit":
         ret, frame = cap.read()
         if ret:
             st.image(frame, channels="BGR", use_container_width=True)
-            # Simulated telemetry from vision translator
+            # Simulated telemetry from vision translator logic 
             velocity, distance = 8.5, 12.0 
-            st.info(f"📊 Perception Sync: Detected Speed {velocity}m/s | Distance {distance}m")
+            st.info(f"📊 Tracking Sync: Velocity {velocity}m/s | Distance {distance}m")
         cap.release()
 
 # -------------------------
-# 6. EXECUTION & VISUALS
+# 6. RESULTS & VISUALIZATION [cite: 3, 8]
 # -------------------------
 report, eff_friction = run_audit(profile, velocity, distance, deceleration, load_weight, base_friction, slope)
 
+# Main Verdict Header
 if report.is_safe():
-    st.success("### ✅ CLEAR TO PROCEED")
+    st.success("### ✅ VERDICT: PHYSICS CLEAR TO PROCEED")
 else:
-    st.error("### ❌ PHYSICS VETO: SAFETY VIOLATION")
+    st.error("### ❌ VERDICT: PHYSICS VETO - SAFETY VIOLATION")
 
-# Risk Score Logic
-score = sum(25 for r in report.results if r.violated)
-st.metric("Risk Score", f"{min(score, 100)}/100")
+# Metric Dashboard Row
+m1, m2, m3, m4 = st.columns(4)
+risk_score = sum(25 for r in report.results if r.violated)
+m1.metric("Risk Score", f"{risk_score}/100", delta=f"{risk_score}%", delta_color="inverse")
+m2.metric("Effective Friction", f"{eff_friction:.2f}")
+m3.metric("Brake Capacity", f"{deceleration} m/s²")
+m4.metric("Load Status", f"{load_weight} kg", delta=f"{profile['max_load']} max")
 
-# Stopping Distance Visualization
+# Stopping Distance Visualization 
 required_stop = (velocity ** 2) / (2 * deceleration) if deceleration > 0 else 0
 buffer = distance - required_stop
 
-fig = go.Figure()
-fig.add_trace(go.Bar(y=["Stopping"], x=[required_stop], orientation='h', name="Stop Dist", marker_color="#EF553B"))
+fig_buffer = go.Figure()
+fig_buffer.add_trace(go.Bar(
+    y=["Path"], x=[required_stop], name="Stopping Distance",
+    orientation='h', marker_color='#EF553B'
+))
 if buffer > 0:
-    fig.add_trace(go.Bar(y=["Margin"], x=[buffer], orientation='h', name="Safe Margin", marker_color="#00CC96"))
-st.plotly_chart(fig, use_container_width=True)
+    fig_buffer.add_trace(go.Bar(
+        y=["Path"], x=[buffer], name="Safety Margin",
+        orientation='h', marker_color='#00CC96'
+    ))
+fig_buffer.update_layout(height=200, margin=dict(l=0, r=0, t=30, b=0), barmode='stack')
+st.plotly_chart(fig_buffer, use_container_width=True)
 
 # -------------------------
-# 7. SAFETY HEATMAP
+# 7. SAFETY HEATMAP 
 # -------------------------
-st.divider()
-st.subheader("📊 Safety Region Heatmap")
-speeds = np.linspace(0, 20, 20)
-distances = np.linspace(1, 30, 20)
-Z = []
+with st.expander("📊 Advanced Safety Region Analysis", expanded=True):
+    st.write("Predicted safety zones across varying speeds and distances.")
+    v_range = np.linspace(0, 20, 25)
+    d_range = np.linspace(1, 30, 25)
+    Z = [[0 if run_audit(profile, v_i, d_j, deceleration, load_weight, base_friction, slope)[0].is_safe() else 1 for d_j in d_range] for v_i in v_range]
 
-for v in speeds:
-    row = []
-    for d_val in distances:
-        r, _ = run_audit(profile, v, d_val, deceleration, load_weight, base_friction, slope)
-        row.append(0 if r.is_safe() else 1)
-    Z.append(row)
-
-heatmap = go.Figure(data=go.Heatmap(z=Z, x=distances, y=speeds, colorscale="RdYlGn_r", showscale=False))
-heatmap.update_layout(xaxis_title="Distance (m)", yaxis_title="Speed (m/s)")
-st.plotly_chart(heatmap, use_container_width=True)
+    heatmap = go.Figure(data=go.Heatmap(
+        z=Z, x=d_range, y=v_range, 
+        colorscale=[[0, '#00CC96'], [1, '#EF553B']], 
+        showscale=False
+    ))
+    heatmap.update_layout(xaxis_title="Distance (m)", yaxis_title="Speed (m/s)", height=450)
+    st.plotly_chart(heatmap, use_container_width=True)
