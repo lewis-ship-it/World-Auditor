@@ -75,26 +75,24 @@ with st.sidebar:
 # -------------------------
 # 4. CORE AUDIT LOGIC 
 # -------------------------
+# Inside run_audit in app.py
 def run_audit(p_data, v, d, decel, load, friction, slp):
-    # Dynamic Friction Model: Speed reduces effective grip 
-    effective_friction = max(friction - min(v * 0.01, 0.3), 0.05)
+    # ... previous logic ...
     zero = Vector3(0.0, 0.0, 0.0)
     
-    agent = AgentState(
-        id="primary_robot", type="mobile", mass=float(p_data["mass"]), position=zero,
-        velocity=Vector3(float(v), 0.0, 0.0), angular_velocity=zero, orientation=Quaternion(1,0,0,0),
-        center_of_mass=zero, center_of_mass_height=float(p_data["com_height"]),
-        support_polygon=[Vector3(-0.5, -0.5, 0), Vector3(0.5, 0.5, 0)],
-        wheelbase=float(p_data["wheelbase"]), load_weight=float(load), max_load=float(p_data["max_load"]),
-        actuator_limits=ActuatorLimits(100.0, 10000.0, 20.0, float(decel)),
-        battery_state=1.0, current_load=None, contact_points=[]
-    )
+    effective_friction = max(friction - min(v * 0.01, 0.3), 0.05)
 
     env = EnvironmentState(
-        temperature=20.0, air_density=1.225, wind_vector=zero, terrain_type="flat",
-        friction=float(effective_friction), slope=float(slp),
-        lighting_conditions="normal", distance_to_obstacles=float(d)
+        temperature=20.0,
+        air_density=1.225,
+        wind_vector=zero,
+        terrain_type="flat",
+        friction=float(effective_friction), # Ensure this matches the class
+        slope=float(slp),
+        lighting_conditions="normal",
+        distance_to_obstacles=float(d)
     )
+    # ... rest of the function ...
 
     world_state = WorldState(
         timestamp=datetime.now().timestamp(), delta_time=0.1, gravity=Vector3(0,0,-9.81),
