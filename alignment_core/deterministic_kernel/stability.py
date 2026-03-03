@@ -1,36 +1,36 @@
+from .base import Constraint, ConstraintResult
 import math
-from ..engine.constraint import ConstraintResult
 
-class StabilityConstraint:
+class StabilityConstraint(Constraint):
+    name = "TippingRisk"
+    severity = "hard"
 
-    def evaluate(self, world_state):
+    def evaluate(self, world_state) -> list:
         results = []
+        env = world_state.environment
+        slope = env.slope
 
         for agent in world_state.agents:
+            # Avoid division by zero if COM height is invalid 
+            center_height = max(agent.center_of_mass_height, 0.01)
+            wheelbase = agent.wheelbase
 
-            slope_rad = math.radians(world_state.environment.slope)
+            # Tipping threshold calculation: tan(theta) = (wheelbase/2) / COM_height [cite: 40, 59]
+            tipping_angle = math.degrees(math.atan((wheelbase / 2) / center_height))
 
-            if agent.center_of_mass_height <= 0:
-                results.append(
-                    ConstraintResult(
-                        name="Stability",
-                        violated=True,
-                        message="Invalid center of mass height."
-                    )
-                )
-                continue
-
-            tipping_angle = math.atan(
-                agent.wheelbase / (2 * agent.center_of_mass_height)
-            )
-
-            violated = slope_rad > tipping_angle
+            violated = slope > tipping_angle
 
             results.append(
                 ConstraintResult(
-                    name="Stability",
-                    violated=violated,
-                    message=f"Slope {world_state.environment.slope:.1f}° / Max safe {math.degrees(tipping_angle):.1f}°"
+                    self.name,
+                    violated,
+                    self.severity,
+                    {
+                        "agent_id": agent.id,
+                        "slope": slope,
+                        "tipping_threshold": tipping_angle,
+                        "details": f"Slope {slope:.1f}° exceeds max safe angle {tipping_angle:.1f}°" [cite: 41, 60]
+                    }
                 )
             )
 

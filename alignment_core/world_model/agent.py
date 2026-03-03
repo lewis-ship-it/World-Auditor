@@ -1,31 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional
-
-
-# --- Basic Math Primitives ---
-
-@dataclass
-class Vector3:
-    x: float
-    y: float
-    z: float
-
-
-@dataclass
-class Quaternion:
-    x: float
-    y: float
-    z: float
-    w: float
-
-
-@dataclass
-class ActuatorLimits:
-    max_force: float
-    max_torque: float
-
-
-# --- Agent State Model ---
+from .primitives import Vector3, Quaternion, ActuatorLimits
 
 @dataclass
 class AgentState:
@@ -58,3 +33,7 @@ class AgentState:
 
     # Contact modeling
     contact_points: List[Vector3]
+
+    def total_mass(self) -> float:
+        """Returns the combined mass of the agent and its current load."""
+        return self.mass + self.load_weight
