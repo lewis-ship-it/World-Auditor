@@ -30,7 +30,7 @@ class BrakingConstraint:
                 continue
 
             stopping_distance = (v ** 2) / (2 * effective_decel)
-            distance_available = world_state.environment.distance_to_obstacle
+            distance_available = world_state.environment.distance_to_obstacles
 
             violated = stopping_distance > distance_available
 
