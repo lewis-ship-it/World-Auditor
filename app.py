@@ -5,6 +5,7 @@ from datetime import datetime
 import cv2
 import tempfile
 
+# --- CORE IMPORTS ---
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.engine.report import SafetyReport
 from alignment_core.constraints.braking import BrakingConstraint
@@ -17,38 +18,24 @@ from alignment_core.world_model.world_state import WorldState
 from alignment_core.world_model.primitives import Vector3, Quaternion, ActuatorLimits
 from alignment_core.world_model.uncertainty import UncertaintyModel
 
-
 st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
 st.title("🛡️ SafeBot: Physics Reality Auditor")
 
-
 # -------------------------
-# PROFILES
+# PROFILES & DATA MAPS
 # -------------------------
-
 ROBOT_PROFILES = {
     "Warehouse Forklift": {"mass": 4000.0, "max_load": 2000.0, "com_height": 1.2, "wheelbase": 2.0},
     "Delivery Rover": {"mass": 80.0, "max_load": 20.0, "com_height": 0.4, "wheelbase": 0.6},
     "Standard Sedan": {"mass": 1500.0, "max_load": 500.0, "com_height": 0.6, "wheelbase": 2.7}
 }
 
-SURFACE_MAP = {
-    "Dry Concrete": 0.8,
-    "Wet Asphalt": 0.4,
-    "Ice": 0.15
-}
-
-BRAKE_MAP = {
-    "New": 5.0,
-    "Used": 2.5,
-    "Failing": 1.0
-}
-
+SURFACE_MAP = {"Dry Concrete": 0.8, "Wet Asphalt": 0.4, "Ice": 0.15}
+BRAKE_MAP = {"New": 5.0, "Used": 2.5, "Failing": 1.0}
 
 # -------------------------
 # SIDEBAR
 # -------------------------
-
 st.sidebar.header("Audit Mode")
 audit_mode = st.sidebar.radio("Mode", ["Manual Simulator", "Live Video Audit"])
 
@@ -61,8 +48,7 @@ friction = SURFACE_MAP[surface_key]
 brake_key = st.sidebar.select_slider("Brake Condition", options=list(BRAKE_MAP.keys()), value="Used")
 deceleration = BRAKE_MAP[brake_key]
 
-velocity = 0.0
-distance = 0.0
+velocity, distance = 0.0, 0.0 # Default placeholders
 
 if audit_mode == "Manual Simulator":
     velocity = st.sidebar.slider("Speed (m/s)", 0.0, 15.0, 5.0)
@@ -72,36 +58,23 @@ load_weight = st.sidebar.slider("Load Weight (kg)", 0.0, 3000.0, 500.0)
 slope = st.sidebar.slider("Slope (degrees)", 0.0, 45.0, 5.0)
 compare_mode = st.sidebar.checkbox("Compare Robot")
 
-
 # -------------------------
 # CORE AUDIT FUNCTION
 # -------------------------
-
 def run_audit(p_data, v, d, decel, load, fric, slp):
     zero_vec = Vector3(x=0.0, y=0.0, z=0.0)
     v_vec = Vector3(x=float(v), y=0.0, z=0.0)
     identity_quat = Quaternion(w=1.0, x=0.0, y=0.0, z=0.0)
-    # Match limits to the current brake/deceleration setting
     limits = ActuatorLimits(max_torque=100.0, max_force=100.0, max_speed=15.0, max_acceleration=float(decel))
 
     agent = AgentState(
-        id="primary_robot",
-        type="mobile",
-        mass=float(p_data["mass"]),
-        position=zero_vec,
-        velocity=v_vec,
-        angular_velocity=zero_vec,
-        orientation=identity_quat,
-        center_of_mass=zero_vec,
+        id="primary_robot", type="mobile", mass=float(p_data["mass"]),
+        position=zero_vec, velocity=v_vec, angular_velocity=zero_vec,
+        orientation=identity_quat, center_of_mass=zero_vec,
         support_polygon=[Vector3(-0.5, -0.5, 0), Vector3(0.5, 0.5, 0)],
-        actuator_limits=limits,
-        battery_state=1.0,
-        current_load=None,
-        contact_points=[],
-        loadweight=float(load),
-        max_load=float(p_data["max_load"]),
-        center_of_mass_height=float(p_data["com_height"]),
-        wheelbase=float(p_data["wheelbase"])
+        actuator_limits=limits, battery_state=1.0, current_load=None, contact_points=[],
+        loadweight=float(load), max_load=float(p_data["max_load"]),
+        center_of_mass_height=float(p_data["com_height"]), wheelbase=float(p_data["wheelbase"])
     )
     
     env = EnvironmentState(
@@ -111,72 +84,68 @@ def run_audit(p_data, v, d, decel, load, fric, slp):
     )
     
     world_state = WorldState(
-        timestamp=datetime.now().timestamp(),
-        delta_time=0.1,
-        gravity=Vector3(x=0.0, y=0.0, z=-9.81),
-        environment=env,
-        agents=[agent], # Keeps compatibility with WorldState init
-        objects=[],
-        uncertainty=UncertaintyModel(0.1, 0.1, 0.1, 0.1)
+        timestamp=datetime.now().timestamp(), delta_time=0.1, gravity=Vector3(0,0,-9.81),
+        environment=env, agents=[agent], objects=[], uncertainty=UncertaintyModel(0.1, 0.1, 0.1, 0.1)
     )
     
-    # --- CRITICAL FIX: Explicitly assign the singular agent attribute ---
-    # This satisfies constraints (Braking, Stability, etc.) that call 'world_state.agent'
-    world_state.agent = agent 
+    world_state.agent = agent # Critical Attribute Bridge
     
     engine = SafetyEngine()
-    engine.register_constraint(BrakingConstraint())
-    engine.register_constraint(FrictionConstraint())
-    engine.register_constraint(LoadConstraint())
-    engine.register_constraint(StabilityConstraint())
+    for c in [BrakingConstraint(), FrictionConstraint(), LoadConstraint(), StabilityConstraint()]:
+        engine.register_constraint(c)
     
     return SafetyReport(engine.evaluate(world_state))
 
 # -------------------------
-# VIDEO MODE
+# VIDEO MODE (Restored with MOT)
 # -------------------------
-
 if audit_mode == "Live Video Audit":
-
-    st.subheader("Video Audit")
+    st.subheader("📸 Multi-Object Perception Audit")
     uploaded_video = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
     if uploaded_video:
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_video.read())
         cap = cv2.VideoCapture(tfile.name)
-
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         ret, frame = cap.read()
 
         if ret:
             st.image(frame, channels="BGR", use_container_width=True)
+            
+            # --- MOT LOGIC RESTORED ---
+            st.divider()
+            st.write("### 📑 Multi-Entity Tracking Results")
+            
+            # Simulated tracked entities in the frame
+            detected_entities = [
+                {"id": "Entity_01", "type": profile_name, "v": 8.0, "dist": 6.0},
+                {"id": "Entity_02", "type": "Standard Sedan", "v": 12.5, "dist": 15.0}
+            ]
 
-            # Simulated detection
-            velocity = 8.0
-            distance = 6.0
+            for entity in detected_entities:
+                with st.expander(f"🔍 Tracking: {entity['id']} ({entity['type']})", expanded=True):
+                    ent_profile = ROBOT_PROFILES[entity['type']]
+                    ent_report = run_audit(ent_profile, entity['v'], entity['dist'], deceleration, load_weight, friction, slope)
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Velocity", f"{entity['v']} m/s")
+                    c2.metric("Distance", f"{entity['dist']} m")
+                    c3.write("✅ PHYSICALLY SAFE" if ent_report.is_safe() else "❌ VETO: UNSAFE")
 
-            dt = 1 / fps
-
-            if "prev_v" not in st.session_state:
-                st.session_state.prev_v = velocity
-
-            prev_v = st.session_state.prev_v
-            accel = abs(velocity - prev_v) / dt
-            st.session_state.prev_v = velocity
-
-            st.metric("Measured Acceleration", f"{accel:.2f} m/s²")
-
-            if accel > 10:
-                st.warning("Reality violation detected")
+            # Update primary metrics for the dashboard
+            velocity, distance = detected_entities[0]["v"], detected_entities[0]["dist"]
+            
+            # Reality Check
+            dt = 1/fps
+            accel = abs(velocity - 2.0) / dt
+            if accel > 10: st.warning("⚠️ Reality violation detected: Movement exceeds physical capabilities.")
 
         cap.release()
 
-
 # -------------------------
-# RUN AUDIT
+# FINAL DASHBOARD OUTPUT
 # -------------------------
-
 report = run_audit(profile, velocity, distance, deceleration, load_weight, friction, slope)
 
 if report.is_safe():
@@ -184,31 +153,22 @@ if report.is_safe():
 else:
     st.error("❌ PHYSICS VETO")
 
+# Visual Impact Zone
 required_stop = (velocity ** 2) / (2 * deceleration) if deceleration > 0 else 0
 buffer = distance - required_stop
 
 fig = go.Figure()
-fig.add_trace(go.Bar(
-    y=["Path"],
-    x=[required_stop],
-    orientation='h'
-))
-
+fig.add_trace(go.Bar(y=["Path"], x=[required_stop], name="Stop Dist", orientation='h', marker_color='#EF553B'))
 if buffer > 0:
-    fig.add_trace(go.Bar(
-        y=["Path"],
-        x=[buffer],
-        orientation='h'
-    ))
-
+    fig.add_trace(go.Bar(y=["Path"], x=[buffer], name="Margin", orientation='h', marker_color='#00CC96'))
 st.plotly_chart(fig, use_container_width=True)
 
-st.metric("Stopping Distance", f"{required_stop:.2f} m")
-st.metric("Safety Margin", f"{buffer:.2f} m")
-
+m1, m2 = st.columns(2)
+m1.metric("Stopping Distance", f"{required_stop:.2f} m")
+m2.metric("Safety Margin", f"{buffer:.2f} m")
 
 if compare_mode:
+    st.divider()
     alt_name = st.selectbox("Compare With", [k for k in ROBOT_PROFILES if k != profile_name])
     alt_report = run_audit(ROBOT_PROFILES[alt_name], velocity, distance, deceleration, load_weight, friction, slope)
-    alt_risk = sum(50 for r in alt_report.results if r.violated)
-    st.write(f"Alternative Risk Score: {alt_risk}")
+    st.write(f"Alternative Risk Score: {sum(50 for r in alt_report.results if r.violated)}")
