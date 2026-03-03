@@ -104,6 +104,7 @@ def run_audit(p_data, v, d, decel, load, friction, slp):
         terrain_type="flat",
         surface_friction=friction,
         slope=slp,
+        lighting_conditions="normal",  # Added missing required field
         distance_to_obstacles=d
     )
 
