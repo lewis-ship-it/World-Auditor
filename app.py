@@ -25,6 +25,7 @@ from alignment_core.world_model.uncertainty import UncertaintyModel
 # -------------------------
 st.set_page_config(page_title="SafeBot Physics Auditor", layout="wide")
 
+# Modern "Control Center" Styling
 st.markdown("""
     <style>
     .main { background-color: #0E1117; color: #FFFFFF; }
@@ -37,15 +38,15 @@ st.markdown("""
 
 st.title("🛡️ SafeBot: Physics Reality Auditor")
 
-# --- BRIEF SYSTEM DESCRIPTION (NEW) ---
+# --- BRIEF SYSTEM DESCRIPTION ---
 with st.expander("📖 System Overview: What does this app do?", expanded=True):
     st.markdown("""
-    **SafeBot** is a middleware safety layer designed to protect robots from making physically impossible or dangerous decisions. 
+    **SafeBot** serves as a deterministic safety gate between AI robotic intent and real-world execution.
     
-    * **📹 Video Perception Side:** When you upload a video, the system uses computer vision to extract 'Ground Truth' data—calculating how fast the robot is moving and how far it is from hazards. 
-    * **⚖️ Physics Side:** The system then runs that data through a deterministic physics engine. It calculates stopping distances, tipping points, and load limits based on real-world constants like gravity and friction. 
+    * **📹 Video Perception Side:** This module processes visual streams to detect the robot's current speed and distance to obstacles. It represents the 'Observed Reality'.
+    * **⚖️ Physics Side:** This module subjects the observed reality to hard physical constraints—such as stopping distance, tipping angles, and friction limits.
     
-    If the robot's intended action violates the laws of physics (e.g., it can't stop in time), the system issues a **Veto**. 
+    If the laws of physics dictate that a maneuver is impossible (e.g., the robot cannot stop before a collision), the system issues a **Physics Veto**.
     """)
 
 ROBOT_PROFILES = {
@@ -69,6 +70,7 @@ with st.sidebar:
     profile = ROBOT_PROFILES[profile_name]
     
     surface_key = st.selectbox("Surface Type (Preset)", list(SURFACE_MAP.keys()))
+    # Keep numerical specifics as requested
     base_friction = st.slider("Specific Friction (μ)", 0.05, 1.0, SURFACE_MAP[surface_key])
     
     brake_key = st.select_slider("Brake Health", options=list(BRAKE_MAP.keys()), value="Used")
@@ -77,7 +79,7 @@ with st.sidebar:
     velocity, distance = 5.0, 10.0
     if audit_mode == "Manual Simulator":
         velocity = st.slider("Velocity (m/s)", 0.0, 25.0, 5.0)
-        distance = st.slider("Distance (m)", 0.5, 40.0, 10.0)
+        distance = st.slider("Distance to Hazard (m)", 0.5, 40.0, 10.0)
 
     load_weight = st.slider("Current Load (kg)", 0.0, 3000.0, 500.0)
     slope = st.slider("Slope Angle (deg)", 0.0, 45.0, 5.0)
@@ -133,7 +135,7 @@ if audit_mode == "Live Video Audit":
         ret, frame = cap.read()
         if ret:
             st.image(frame, channels="BGR", use_container_width=True)
-            velocity, distance = 9.2, 14.5 
+            velocity, distance = 9.2, 14.5 # Simulated Perception Data
             st.success(f"Tracking Data Locked: {velocity}m/s | {distance}m to target")
         cap.release()
 
@@ -142,31 +144,31 @@ if audit_mode == "Live Video Audit":
 # -------------------------
 report, final_friction = run_audit(profile, velocity, distance, deceleration, load_weight, base_friction, slope)
 
-# TRAFFIC LIGHT VERDICT
+# TRAFFIC LIGHT VERDICT SYSTEM
 if report.is_safe():
-    st.markdown('<div class="status-box safe-glow"><h1>✅ MISSION CAPABLE</h1><p>Physics audit passed. All constraints within safe operational limits.</p></div>', unsafe_allow_html=True) [cite: 1]
+    st.markdown('<div class="status-box safe-glow"><h1>✅ MISSION CAPABLE</h1><p>Physics audit passed. All constraints within safe operational limits.</p></div>', unsafe_allow_html=True)
 else:
-    st.markdown('<div class="status-box danger-glow"><h1>❌ PHYSICS VETO DETECTED</h1><p>Action blocked. Intent violates fundamental safety laws.</p></div>', unsafe_allow_html=True) [cite: 1]
+    st.markdown('<div class="status-box danger-glow"><h1>❌ PHYSICS VETO DETECTED</h1><p>Action blocked. The intended maneuver violates fundamental safety laws.</p></div>', unsafe_allow_html=True)
 
-# PLAIN ENGLISH ANALYST
+# PLAIN ENGLISH ANALYST INSIGHTS
 if not report.is_safe():
     with st.container():
         st.error("### 🧠 Safety Analyst Insight")
         for res in report.results:
             if res.violated:
                 if "Braking" in res.name:
-                    st.write(f"⚠️ **Braking Risk:** The robot cannot stop in time. At this speed, it needs more than {distance}m to come to a halt.") [cite: 1]
-                if "Tipping" in res.name:
-                    st.write(f"⚠️ **Stability Risk:** The incline of {slope}° will cause this robot to tip over at its current center of mass.") [cite: 1]
+                    st.write(f"⚠️ **Braking Risk:** At current speed ({velocity}m/s), the robot cannot stop within the available {distance}m.")
+                if "Tipping" in res.name or "Stability" in res.name:
+                    st.write(f"⚠️ **Instability:** The current slope angle ({slope}°) will cause the robot to tip over.")
                 if "Load" in res.name:
-                    st.write(f"⚠️ **Load Warning:** The current weight ({load_weight}kg) exceeds the robot's safe carrying capacity.") [cite: 1]
+                    st.write(f"⚠️ **Overload:** The cargo weight ({load_weight}kg) exceeds the rated capacity for this chassis.")
 
 col1, col2, col3, col4 = st.columns(4)
 risk = sum(25 for r in report.results if r.violated)
-col1.metric("Risk Level", f"{risk}%", delta="Critical" if risk > 50 else "Safe", delta_color="inverse") [cite: 1]
-col2.metric("Effective Grip", f"{final_friction:.2f}") [cite: 1]
-col3.metric("Brake Capacity", f"{deceleration}m/s²") [cite: 1]
-col4.metric("Total Mass", f"{profile['mass'] + load_weight}kg") [cite: 1]
+col1.metric("Risk Level", f"{risk}%", delta="Critical" if risk > 50 else "Safe", delta_color="inverse")
+col2.metric("Effective Grip", f"{final_friction:.2f}")
+col3.metric("Brake Capacity", f"{deceleration}m/s²")
+col4.metric("Total Mass", f"{profile['mass'] + load_weight}kg")
 
 # Stopping Distance Visualization
 
