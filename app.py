@@ -9,19 +9,19 @@ import tempfile
 import time
 from PIL import Image
 
-# --- 1. MODULAR IMPORTS ---
-from alignment_core import SafetyEngine
+# --- 1. MODULAR IMPORTS FROM YOUR ARCHITECTURE ---
+from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.engine.report import SafetyReport
 from alignment_core.constraints.braking import BrakingConstraint
 from alignment_core.constraints.friction import FrictionConstraint
 from alignment_core.constraints.load import LoadConstraint
 from alignment_core.constraints.stability import StabilityConstraint
 
-# Physics & Mechanics Utilities
+# Physics & Mechanics Utilities [cite: 153, 154]
 from alignment_core.physics.mechanics import calculate_auto_cog, get_support_polygon
 from alignment_core.physics.curves import calculate_max_cornering_speed, check_lateral_stability
 
-# World Model Data Structures
+# World Model Data Structures [cite: 136, 171]
 from alignment_core.world_model.agent import AgentState
 from alignment_core.world_model.environment import EnvironmentState
 from alignment_core.world_model.world_state import WorldState
@@ -29,7 +29,7 @@ from alignment_core.world_model.primitives import Vector3, Quaternion, ActuatorL
 from alignment_core.world_model.uncertainty import UncertaintyModel
 
 # -------------------------
-# 2. CONFIGURATION & STYLING
+# 2. CONFIGURATION & STYLING [cite: 172-177]
 # -------------------------
 st.set_page_config(page_title="SafeBot Physics Auditor Pro", layout="wide")
 
@@ -46,7 +46,7 @@ st.markdown("""
 st.title("🛡️ SafeBot: Physics Reality Auditor")
 
 # -------------------------
-# 3. SIDEBAR: ROBOT BUILDER
+# 3. SIDEBAR: ROBOT BUILDER [cite: 178, 179]
 # -------------------------
 with st.sidebar:
     st.header("⚙️ System Config")
@@ -57,7 +57,7 @@ with st.sidebar:
         bat_m = st.number_input("Battery Mass (kg)", 0.0, 2000.0, 200.0)
         load_m = st.slider("Cargo Load (kg)", 0.0, 3000.0, 100.0)
         
-        # Auto-calculate Center of Gravity using mechanics.py [cite: 64]
+        # Auto-calculate Center of Gravity using mechanics.py [cite: 153]
         cog_h, total_m = calculate_auto_cog(chassis_m, 0.5, bat_m, 0.1, load_m, 1.2)
         
         wb = st.slider("Wheelbase (m)", 0.5, 5.0, 2.0)
@@ -66,13 +66,13 @@ with st.sidebar:
         st.info(f"Total Weight: {total_m}kg | CoG: {cog_h:.2f}m")
 
 # -------------------------
-# 4. SHARED AUDIT ENGINE (FIXED)
+# 4. SHARED AUDIT ENGINE [cite: 179-184]
 # -------------------------
 def run_audit(v, d, f, s, wb_in, tw_in, wh_in, total_m_in, cog_h_in, load_m_in, c_mode=False, rad=0, bank=0):
-    # 1. Generate the support polygon needed for stability calculations [cite: 65]
+    # 1. Generate the support polygon needed for stability calculations [cite: 154]
     poly = get_support_polygon(wb_in, tw_in, wh_in)
     
-    # 2. Initialize AgentState using only supported core arguments [cite: 88]
+    # 2. Initialize AgentState using the correct Primitives [cite: 180]
     agent = AgentState(
         id="robot_01",
         type="mobile",
@@ -81,28 +81,26 @@ def run_audit(v, d, f, s, wb_in, tw_in, wh_in, total_m_in, cog_h_in, load_m_in, 
         velocity=Vector3(float(v), 0.0, 0.0), 
         angular_velocity=Vector3(0.0, 0.0, 0.0),
         orientation=Quaternion(1.0, 0.0, 0.0, 0.0), 
-        center_of_mass=Vector3(0.0, 0.0, float(cog_h_in)),
+        center_of_mass=Vector3(0.0, 0.0, 0.0),
+        center_of_mass_height=float(cog_h_in),
+        support_polygon=poly,
+        wheelbase=float(wb_in),
+        load_weight=float(load_m_in),
+        max_load=5000.0,
         actuator_limits=ActuatorLimits(100.0, 100.0, 30.0, 5.0), 
         battery_state=1.0,
         current_load=None,
         contact_points=[]
     )
     
-    # FIX: Assign additional attributes required by constraints after initialization 
-    agent.center_of_mass_height = float(cog_h_in)
-    agent.support_polygon = poly
-    agent.wheelbase = float(wb_in)
-    agent.load_weight = float(load_m_in)
-    agent.max_load = 5000.0
-    
-    # 3. Setup the EnvironmentState [cite: 67, 87]
+    # 3. Setup the EnvironmentState [cite: 181]
     env = EnvironmentState(
         friction=float(f),
         slope=0.0 if c_mode else float(s),
         distance_to_obstacles=float(d)
     )
 
-    # 4. Compile into WorldState [cite: 68, 89]
+    # 4. Compile into WorldState [cite: 182]
     world = WorldState(
         timestamp=time.time(),
         delta_time=0.1,
@@ -113,7 +111,7 @@ def run_audit(v, d, f, s, wb_in, tw_in, wh_in, total_m_in, cog_h_in, load_m_in, 
         uncertainty=UncertaintyModel(0.05, 0.05, 0.05, 0.01)
     )
     
-    # 5. Initialize the SafetyEngine and register necessary constraints [cite: 69, 24]
+    # 5. Initialize the SafetyEngine with core constraints [cite: 182]
     engine = SafetyEngine([
         BrakingConstraint(),
         FrictionConstraint(),
@@ -121,12 +119,19 @@ def run_audit(v, d, f, s, wb_in, tw_in, wh_in, total_m_in, cog_h_in, load_m_in, 
         LoadConstraint()
     ])
     
-    # 6. Evaluate and return the safety report [cite: 69]
-    report = SafetyReport(engine.evaluate(world))
+    # 6. Evaluate and flatten results [cite: 183, 243]
+    raw_results = engine.evaluate(world)
+    flat_results = []
+    for res in raw_results:
+        if isinstance(res, list):
+            flat_results.extend(res)
+        else:
+            flat_results.append(res)
+            
+    report = SafetyReport(flat_results)
     
     curve_data = {}
     if c_mode and rad > 0:
-        # Calculate specialized cornering metrics if in curve mode [cite: 70]
         v_max = calculate_max_cornering_speed(rad, f, bank)
         is_tip, a_lat = check_lateral_stability(v, rad, cog_h_in, tw_in, bank)
         curve_data = {"v_max": v_max, "is_tip": is_tip, "a_lat": a_lat}
@@ -134,10 +139,9 @@ def run_audit(v, d, f, s, wb_in, tw_in, wh_in, total_m_in, cog_h_in, load_m_in, 
     return report, curve_data
 
 # -------------------------
-# 5. MODE LOGIC (FULL)
+# 5. MODE LOGIC [cite: 185-195]
 # -------------------------
 if audit_mode == "Manual Simulator":
-    # 5.1 SLIDERS & INPUTS [cite: 71]
     is_curve = st.sidebar.checkbox("Curve Analysis")
     radius = st.sidebar.slider("Radius (m)", 5.0, 100.0, 25.0) if is_curve else 0
     banking = st.sidebar.slider("Banking (deg)", 0.0, 45.0, 0.0) if is_curve else 0
@@ -147,16 +151,13 @@ if audit_mode == "Manual Simulator":
     distance = st.sidebar.slider("Dist to Hazard (m)", 1.0, 100.0, 20.0)
     latency = st.sidebar.slider("System Latency (s)", 0.0, 1.0, 0.2)
 
-    # UPDATED CALL: Passing all mechanical parameters [cite: 71]
     report, curve_res = run_audit(velocity, distance, friction, slope, wb, tw, wheels, total_m, cog_h, load_m, is_curve, radius, banking)
     is_safe = report.is_safe()
     if is_curve and curve_res.get("is_tip"): is_safe = False
 
-    # 5.2 STATUS UI [cite: 72]
     status_class = "safe-glow" if is_safe else "danger-glow"
     st.markdown(f'<div class="status-box {status_class}"><h1>{"✅ MISSION CAPABLE" if is_safe else "❌ PHYSICS VETO"}</h1></div>', unsafe_allow_html=True)
 
-    # 5.3 3D RECONSTRUCTION [cite: 72, 73]
     st.subheader("🌐 Real-Time Reality Twin")
     fig_3d = go.Figure()
     fig_3d.add_trace(go.Surface(z=np.zeros((10, 10)), x=np.linspace(-5, 5, 10), y=np.linspace(0, distance + 10, 10), colorscale='Greys', showscale=False, opacity=0.2))
@@ -165,7 +166,6 @@ if audit_mode == "Manual Simulator":
     fig_3d.update_layout(scene=dict(aspectmode='data'), height=400, margin=dict(l=0,r=0,b=0,t=0))
     st.plotly_chart(fig_3d, use_container_width=True)
 
-    # 5.4 ANIMATED RUNWAY [cite: 73, 75]
     st.subheader("🏁 Real-Time Physics Runway")
     sim_container = st.empty()
     if st.button("▶️ Run Stress Test"):
@@ -178,12 +178,11 @@ if audit_mode == "Manual Simulator":
             fig.add_trace(go.Scatter(x=[0, distance+10], y=[0, 0], mode='lines', line=dict(color="#30363D", width=6)))
             fig.add_trace(go.Scatter(x=[distance], y=[0], mode='markers', marker=dict(size=40, color="#EF553B", symbol="line-ns-open")))
             fig.add_trace(go.Scatter(x=[curr_p], y=[0.5], mode='markers', marker=dict(size=25, color="#00d4ff", symbol="square")))
-            fig.update_layout(height=250, showlegend=False, xaxis=dict(range=[-2, max(distance, t_stop_total)+10]), yaxis=dict(velocity=False))
+            fig.update_layout(height=250, showlegend=False, xaxis=dict(range=[-2, max(distance, t_stop_total)+10]), yaxis=dict(visible=False))
             sim_container.plotly_chart(fig, use_container_width=True)
             if curr_p >= distance or curr_p >= t_stop_total: break
             time.sleep(0.02)
 
-    # 5.5 ANALYTICS GRID [cite: 75, 77]
     st.divider()
     m1, m2, m3 = st.columns([1, 1, 2])
     with m1:
@@ -195,8 +194,8 @@ if audit_mode == "Manual Simulator":
         st.subheader("📊 Physics Metrics")
         st.metric("Risk Score", f"{report.risk_score()}")
         for res in report.results:
-            if res.violated: st.error(f"⚠️ {res.name}")
-            else: st.caption(f"✅ {res.name}")
+            if hasattr(res, 'violated') and res.violated: st.error(f"⚠️ {res.name}")
+            elif hasattr(res, 'violated'): st.caption(f"✅ {res.name}")
     with m3:
         st.subheader("🔍 Safety Envelope")
         v_ax, d_ax = np.linspace(0.1, 30, 15), np.linspace(1, 100, 15)
