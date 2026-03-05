@@ -69,55 +69,67 @@ with st.sidebar:
 # 4. SHARED AUDIT ENGINE
 # -------------------------
 def run_audit(v, d, f, s, c_mode=False, rad=0, bank=0):
-    # 1. Create the support polygon required for stability checks
-    poly = get_support_polygon(wb, tw, wheels)
+    # 1. Generate the support polygon needed for stability calculations [cite: 2]
+    poly = get_support_polygon(wheelbase, track_width, wheels)
     
-    # 2. Use the correct Primitives (Vector3/Quaternion)
+    # 2. Initialize AgentState using the correct Primitives (Vector3/Quaternion) 
     agent = AgentState(
         id="robot_01",
         type="mobile",
-        mass=float(total_m),
-        position=Vector3(0.0, 0.0, 0.0), # Use Vector3 primitive
-        velocity=Vector3(float(v), 0.0, 0.0), # Use Vector3 primitive
+        mass=float(mass + load_weight),
+        position=Vector3(0.0, 0.0, 0.0), # Correct: Using Vector3 
+        velocity=Vector3(float(v), 0.0, 0.0), # Correct: Using Vector3 
         angular_velocity=Vector3(0.0, 0.0, 0.0),
-        orientation=Quaternion(1.0, 0.0, 0.0, 0.0), # Use Quaternion primitive
+        orientation=Quaternion(1.0, 0.0, 0.0, 0.0), # Correct: Using Quaternion 
         center_of_mass=Vector3(0.0, 0.0, 0.0),
-        center_of_mass_height=float(cog_h),
+        center_of_mass_height=float(com_height),
         support_polygon=poly,
-        wheelbase=float(wb),
-        load_weight=float(load_m),
+        wheelbase=float(wheelbase),
+        load_weight=float(load_weight),
         max_load=5000.0,
-        actuator_limits=ActuatorLimits(100.0, 100.0, 30.0, 5.0), # Define limits
+        # Group limits into the ActuatorLimits object 
+        actuator_limits=ActuatorLimits(100.0, 100.0, 30.0, 5.0), 
         battery_state=1.0,
         current_load=None,
         contact_points=[]
     )
     
-    # 3. Compile into WorldState (Note: agents must be in a list)
+    # 3. Setup the EnvironmentState 
     env = EnvironmentState(
         friction=float(f),
         slope=0.0 if c_mode else float(s),
         distance_to_obstacles=float(d)
     )
 
+    # 4. Compile into WorldState (Note: agents MUST be in a list) 
     world = WorldState(
         timestamp=time.time(),
         delta_time=0.1,
         gravity=Vector3(0.0, 0.0, -9.81),
         environment=env,
-        agents=[agent], # The engine expects a list of agents
+        agents=[agent], # Corrected: Passed as a list 
         objects=[],
         uncertainty=UncertaintyModel(0.05, 0.05, 0.05, 0.05)
     )
     
-    # 4. Standard engine evaluation
+    # 5. Initialize the SafetyEngine and register necessary constraints 
     engine = SafetyEngine()
     engine.register_constraint(BrakingConstraint())
     engine.register_constraint(FrictionConstraint())
     engine.register_constraint(StabilityConstraint())
     engine.register_constraint(LoadConstraint())
     
+    # 6. Evaluate and return the safety report 
     report = SafetyReport(engine.evaluate(world))
+    
+    curve_data = {}
+    if c_mode and rad > 0:
+        # Calculate specialized cornering metrics if in curve mode [cite: 2]
+        v_max = calculate_max_cornering_speed(rad, f, bank)
+        is_tip, a_lat = check_lateral_stability(v, rad, com_height, track_width, bank)
+        curve_data = {"v_max": v_max, "is_tip": is_tip, "a_lat": a_lat}
+        
+    return report, curve_data
     # ... rest of your curve logic ...
     curve_data = {}
     if c_mode and rad > 0:
