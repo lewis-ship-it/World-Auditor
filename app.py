@@ -63,9 +63,26 @@ with st.sidebar:
 # -------------------------
 def run_audit(v, d, f, s, c_mode=False, rad=0, bank=0):
     poly = get_support_polygon(wb, tw, wheels)
-    agent = AgentState("bot", "mobile", total_m, Vector3(0,0,0), Vector3(v,0,0), Vector3(0,0,0), 
-                       Quaternion(1,0,0,0), cog_h, poly, wb, load_m, 5000.0, 
-                       ActuatorLimits(100,100,30,5.0), 1.0, None, [])
+    # Ensure all required fields are explicitly named to avoid TypeError
+    agent = AgentState(
+        id="bot",
+        type="mobile",
+        mass=float(total_m),
+        position=Vector3(0, 0, 0),
+        velocity=Vector3(float(v), 0, 0),
+        angular_velocity=Vector3(0, 0, 0),
+        orientation=Quaternion(1, 0, 0, 0),
+        center_of_mass=Vector3(0, 0, 0), # Ensure this field exists in your AgentState
+        center_of_mass_height=float(cog_h),
+        support_polygon=poly,
+        wheelbase=float(wb),
+        load_weight=float(load_m),
+        max_load=5000.0,
+        actuator_limits=ActuatorLimits(100, 100, 30, 5.0),
+        battery_state=1.0,
+        current_load=None,
+        contact_points=[]
+    )
     env = EnvironmentState(f, 0.0 if c_mode else s, d, 20.0, 1.225, Vector3(0,0,0), "flat", "normal")
     world = WorldState(time.time(), 0.1, Vector3(0,0,-9.81), env, [agent], [], UncertaintyModel(0.05,0.05,0.05,0.05))
     
