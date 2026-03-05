@@ -10,7 +10,7 @@ import time
 from PIL import Image
 
 # --- 1. MODULAR IMPORTS ---
-from alignment_core.engine.safety_engine import SafetyEngine
+from alignment_core import SafetyEngine
 from alignment_core.engine.report import SafetyReport
 from alignment_core.constraints.braking import BrakingConstraint
 from alignment_core.constraints.friction import FrictionConstraint
