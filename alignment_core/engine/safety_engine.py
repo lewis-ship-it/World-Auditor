@@ -1,16 +1,17 @@
 class SafetyEngine:
 
-    def __init__(self):
-        self.constraints = []
+    def __init__(self, constraints):
 
-    def register_constraint(self, constraint):
-        self.constraints.append(constraint)
+        self.constraints = constraints
+
 
     def evaluate(self, world_state):
+
         results = []
 
         for constraint in self.constraints:
-            constraint_results = constraint.evaluate(world_state)
-            results.extend(constraint_results)
+
+            r = constraint.evaluate(world_state)
+            results.append(r)
 
         return results
