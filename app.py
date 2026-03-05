@@ -43,7 +43,7 @@ wheelbase = st.sidebar.slider("Wheelbase (m)", 0.5, 3.0, 1.2)
 
 mode = st.sidebar.radio(
     "Mode",
-    ["Safety Audit", "Monte Carlo Simulation", "Trajectory Prediction", "3D Visualizer", "AI Action Auditor", "Image / Video Physics Audit"]
+    ["Safety Audit", "Monte Carlo Simulation","Real-Time Safety Shield","AI Physics Video Audit", "Trajectory Prediction", "3D Visualizer", "AI Action Auditor", "Image / Video Physics Audit"]
 )
 
 
@@ -112,6 +112,88 @@ if mode == "Safety Audit":
                 st.error(f"{r['constraint']} FAILED")
 
             st.json(r)
+elif mode == "Real-Time Safety Shield":
+
+    st.header("Robot Command Safety Shield")
+
+    proposed_velocity = st.slider("AI proposed velocity", 0.0, 15.0, 8.0)
+
+    if st.button("Send Robot Command"):
+
+        world_state = build_world()
+
+        world_state.agent.velocity = proposed_velocity
+
+        engine = build_engine()
+
+        from alignment_core.shield.safety_shield import SafetyShield
+        from alignment_core.shield.action_optimizer import ActionOptimizer
+
+        shield = SafetyShield(engine)
+
+        result = shield.intercept(world_state, "move")
+
+        if result["approved"]:
+
+            st.success("Command Approved — Robot may proceed")
+
+        else:
+
+            st.error("Command BLOCKED")
+
+            st.write(result["violations"])
+
+            optimizer = ActionOptimizer(engine)
+
+            safe_velocity = optimizer.find_safe_velocity(world_state)
+
+            st.warning(
+                f"Suggested safe velocity: {safe_velocity:.2f} m/s"
+            )
+elif mode == "AI Physics Video Audit":
+
+    st.header("Physics Violation Detection")
+
+    uploaded = st.file_uploader("Upload robot video")
+
+    if uploaded:
+
+        import tempfile
+        from alignment_core.vision.physics_video_analyzer import PhysicsVideoAnalyzer
+        from alignment_core.vision.violation_detector import ViolationDetector
+
+        temp = tempfile.NamedTemporaryFile(delete=False)
+
+        temp.write(uploaded.read())
+
+        video_path = temp.name
+
+        analyzer = PhysicsVideoAnalyzer()
+
+        st.write("Analyzing motion...")
+
+        velocities = analyzer.estimate_motion(video_path)
+
+        st.write("Estimated velocities:")
+        st.write(velocities[:10])
+
+        world_state = build_world()
+
+        engine = build_engine()
+
+        detector = ViolationDetector(engine)
+
+        violations = detector.analyze(world_state, velocities)
+
+        if len(violations) == 0:
+
+            st.success("No physics violations detected")
+
+        else:
+
+            st.error("Physics violations detected")
+
+            st.write(violations[:10])
 
 elif mode == "AI Action Auditor":
 
