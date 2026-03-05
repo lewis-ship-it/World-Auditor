@@ -13,7 +13,7 @@ class ActionOptimizer:
 
         for v in velocities:
 
-            world_state.agent.velocity = v
+            world_state.agents.velocity = v
 
             results = self.engine.evaluate(world_state)
 

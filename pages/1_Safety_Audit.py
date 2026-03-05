@@ -28,11 +28,9 @@ if st.button("Run Audit"):
 
     results = engine.evaluate(world)
 
-    for r in results:
-
-        if r["safe"]:
-            st.success(r["constraint"])
-        else:
-            st.error(r["constraint"])
-
-        st.json(r)
+for r in results:
+    if not r.violated:
+        st.success(r.name)
+    else:
+        st.error(r.name)
+    st.json(r.to_dict())

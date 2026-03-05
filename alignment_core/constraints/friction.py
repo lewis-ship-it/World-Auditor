@@ -1,24 +1,23 @@
-from .base import Constraint, ConstraintResult
-import math
+def compute_effective_friction(world_state):
+    """
+    Computes the effective friction coefficient for the primary agent.
+    """
 
-class FrictionConstraint(Constraint):
-    name = "TractionCheck"
-    severity = "medium"
+    agent = world_state.primary_agent()
+    env = world_state.environment
 
-    def evaluate(self, world_state):
-        results = []
-        env = world_state.environment
-        
-        # LIST-SAFE PATTERN: Iterate through agents
-        for agent in world_state.agents:
-            friction_coeff = env.friction
-            # Simple check: if friction is dangerously low (like ice)
-            violated = friction_coeff < 0.2 
+    base_friction = agent.friction
+    modifier = env.friction_modifier
 
-            results.append(ConstraintResult(
-                self.name,
-                violated,
-                self.severity,
-                {"effective_friction": friction_coeff}
-            ))
-        return results
+    effective_friction = base_friction * modifier
+
+    if env.surface == "wet":
+        effective_friction *= 0.7
+
+    if env.surface == "ice":
+        effective_friction *= 0.3
+
+    if env.surface == "sand":
+        effective_friction *= 0.8
+
+    return max(0.05, effective_friction)
