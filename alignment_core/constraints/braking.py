@@ -1,23 +1,16 @@
-import math
+# alignment_core/constraints/braking.py
+from .base import ConstraintResult # Ensure this import exists
 
-
-class BrakingConstraint:
-
-    def evaluate(self, world_state):
-
-        agent = world_state.agent
-        env = world_state.environment
-
-        v = agent.velocity
-        mu = env.friction
-        g = 9.81
-
-        stopping_distance = (v ** 2) / (2 * mu * g)
-
-        safe = stopping_distance < env.distance_to_obstacles
-
-        return {
-            "constraint": "Braking",
-            "safe": safe,
-            "stopping_distance": stopping_distance
-        }
+def evaluate(self, world_state):
+    # ... existing logic ...
+    results = []
+    for agent in world_state.agents: # Loop through agents like the others
+        v = agent.velocity.x # Use the agent's velocity
+        # ... calculation logic ...
+        results.append(ConstraintResult(
+            "Braking", 
+            violated=(stopping_distance > env.distance_to_obstacles),
+            severity="hard",
+            details={"distance": stopping_distance}
+        ))
+    return results
