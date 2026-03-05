@@ -62,51 +62,74 @@ with st.sidebar:
 # 4. SHARED AUDIT ENGINE
 # -------------------------
 def run_audit(v, d, f, s, c_mode=False, rad=0, bank=0):
+    # Retrieve support polygon based on sidebar geometry
     poly = get_support_polygon(wb, tw, wheels)
-    # Ensure all required fields are explicitly named to avoid TypeError
+    
+    # Setup Agent with explicit keyword arguments [cite: 188, 255]
     agent = AgentState(
-        id="bot",
+        id="bot_01",
         type="mobile",
         mass=float(total_m),
-        position=Vector3(0, 0, 0),
-        velocity=Vector3(float(v), 0, 0),
-        angular_velocity=Vector3(0, 0, 0),
-        orientation=Quaternion(1, 0, 0, 0),
-        center_of_mass=Vector3(0, 0, 0), # Ensure this field exists in your AgentState
+        position=Vector3(0.0, 0.0, 0.0),
+        velocity=Vector3(float(v), 0.0, 0.0),
+        angular_velocity=Vector3(0.0, 0.0, 0.0),
+        orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
+        center_of_mass=Vector3(0.0, 0.0, 0.0),
         center_of_mass_height=float(cog_h),
         support_polygon=poly,
         wheelbase=float(wb),
         load_weight=float(load_m),
         max_load=5000.0,
-        actuator_limits=ActuatorLimits(100, 100, 30, 5.0),
-        battery_state=1.0,
         current_load=None,
+        actuator_limits=ActuatorLimits(100.0, 100.0, 30.0, 5.0),
+        battery_state=1.0,
         contact_points=[]
     )
-    env = EnvironmentState(f, 0.0 if c_mode else s, d, 20.0, 1.225, Vector3(0,0,0), "flat", "normal")
-    world = WorldState(time.time(), 0.1, Vector3(0,0,-9.81), env, [agent], [], UncertaintyModel(0.05,0.05,0.05,0.05))
+    
+    # Setup Environment with explicit keyword arguments 
+    env = EnvironmentState(
+        temperature=20.0,
+        air_density=1.225,
+        wind_vector=Vector3(0.0, 0.0, 0.0),
+        terrain_type="flat",
+        friction=float(f),
+        slope=0.0 if c_mode else float(s),
+        lighting_conditions="normal",
+        distance_to_obstacles=float(d)
+    )
+    
+    world = WorldState(
+        timestamp=time.time(),
+        delta_time=0.1,
+        gravity=Vector3(0.0, 0.0, -9.81),
+        environment=env,
+        agents=[agent],
+        objects=[],
+        uncertainty=UncertaintyModel(0.05, 0.05, 0.05, 0.05)
+    )
     
     engine = SafetyEngine()
     for c in [BrakingConstraint(), FrictionConstraint(), StabilityConstraint()]: 
         engine.register_constraint(c)
     
     report = SafetyReport(engine.evaluate(world))
+    
     c_data = {}
     if c_mode and rad > 0:
         v_max = calculate_max_cornering_speed(rad, f, bank)
         is_tip, a_lat = check_lateral_stability(v, rad, cog_h, tw, bank)
         c_data = {"v_max": v_max, "is_tip": is_tip, "a_lat": a_lat}
+        
     return report, c_data
 
 # -------------------------
-# 5. MODE: MISSION MAP PLANNER (NEW)
+# 5. MODE: MISSION MAP PLANNER
 # -------------------------
 if audit_mode == "Mission Map Planner":
     st.subheader("🗺️ Strategic Fastest Path Mapping")
     map_file = st.file_uploader("Upload Floor Plan / Map", type=["png", "jpg"])
     
     if map_file:
-        # Load and Process Map
         file_bytes = np.asarray(bytearray(map_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -116,18 +139,14 @@ if audit_mode == "Mission Map Planner":
         
         if st.button("🚀 Calculate Physics-Safe Fastest Path"):
             with st.status("Analyzing Geometry...", expanded=True) as status:
-                st.write("Extracting curve radii...")
-                # Simulating path curvature extraction (R=10m for example)
                 sample_radius = 10.0
                 v_safe = calculate_max_cornering_speed(sample_radius, 0.8, 0.0)
-                
                 status.update(label="Optimization Complete!", state="complete")
                 
             st.success(f"Path Verified: Max cornering speed for your {total_m}kg robot is {v_safe:.2f} m/s")
             
-            # Visualize a mock speed-heatmap path
             x = np.linspace(0, 100, 100)
-            y = 10 * np.sin(x/10) # Simulated path
+            y = 10 * np.sin(x/10)
             speeds = [v_safe if abs(np.cos(xi/10)) > 0.5 else v_safe * 1.5 for xi in x]
             
             fig = go.Figure(data=go.Scatter(x=x, y=y, mode='lines', 
@@ -139,7 +158,6 @@ if audit_mode == "Mission Map Planner":
 # 6. MODE: MANUAL SIMULATOR
 # -------------------------
 elif audit_mode == "Manual Simulator":
-    # Sidebar local controls
     is_curve = st.sidebar.checkbox("Curve Analysis")
     radius = st.sidebar.slider("Radius (m)", 5.0, 100.0, 25.0) if is_curve else 0
     banking = st.sidebar.slider("Banking (deg)", 0.0, 45.0, 0.0) if is_curve else 0
@@ -173,7 +191,6 @@ elif audit_mode == "Manual Simulator":
             if curr_p >= distance or curr_p >= t_stop_total: break
             time.sleep(0.02)
 
-    # Analytics Section
     st.divider()
     m1, m2, m3 = st.columns([1, 1, 2])
     with m1:
