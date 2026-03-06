@@ -27,7 +27,12 @@ The system will:
 
 st.sidebar.header("Robot Physics")
 
-mass = st.sidebar.number_input("Robot Mass (kg)", 1.0, 500.0, 40.0)
+mass = st.sidebar.number_input(
+    "Robot Mass (kg)",
+    min_value=0.001,
+    value=40.0,
+    step=1.0
+)
 
 wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 3.0, 0.6)
 
