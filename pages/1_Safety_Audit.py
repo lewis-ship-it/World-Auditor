@@ -1,10 +1,14 @@
 import sys
 import os
 
-# Add the root directory to the sys.path so sub-pages can find 'alignment_core' and 'ui'
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Get the absolute path of the current file's parent's parent (the root)
+root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# NOW you can do your imports
+# Add it to the system path if it's not already there
+if root_path not in sys.path:
+    sys.path.insert(0, root_path)
+
+# NOW your imports will work
 from ui.engine_builder import build_engine
 from alignment_core.constraints.braking import BrakingConstraint
 st.title("Safety Audit")
