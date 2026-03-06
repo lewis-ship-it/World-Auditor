@@ -52,11 +52,11 @@ with col1:
 with col2:
     st.markdown('<div class="module-card"><h2>📹 Video Intelligence</h2><p>AI Perception Layer. Upload footage to estimate motion vectors and detect physics violations in the wild.</p></div>', unsafe_allow_html=True)
     if st.button("Start Video Analysis"):
-        st.switch_page("pages/3_Video_Audit.py")
+        st.switch_page("pages/6_Video_Audit.py")
 
     st.markdown('<div class="module-card"><h2>🗺️ Mission Planner</h2><p>Strategic route optimization. Calculate safe cornering speeds and tipping risks for complex pathing.</p></div>', unsafe_allow_html=True)
     if st.button("View Map Optimizer"):
-        st.switch_page("pages/4_Map_path_Planner.py")
+        st.switch_page("pages/5_Map_path_Planner.py")
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
