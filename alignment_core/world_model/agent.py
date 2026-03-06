@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class AgentState:
 
@@ -7,12 +8,18 @@ class AgentState:
     type: str
 
     mass: float
-    velocity: float
+    length: float
+    width: float
+    height: float
 
-    braking_force: float
-    max_deceleration: float
-
-    load_weight: float
+    wheelbase: float
+    track_width: float
 
     center_of_mass_height: float
-    wheelbase: float
+
+    velocity: float
+    acceleration: float
+
+    drive_type: str = "differential"
+
+    contact_points: list | None = None

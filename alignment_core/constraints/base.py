@@ -1,26 +1,13 @@
-from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 
+@dataclass
 class ConstraintResult:
-    def __init__(self, name, violated, severity="soft", details=None):
-        self.name = name
-        self.violated = violated
-        self.severity = severity  # "hard" or "soft"
-        self.details = details or {}
 
-    def to_dict(self):
-        return {
-            "name": self.name,
-            "violated": self.violated,
-            "severity": self.severity,
-            "details": self.details,
-        }
+    name: str
 
+    passed: bool
 
-class Constraint(ABC):
-    name = "UnnamedConstraint"
-    severity = "soft"
+    message: str
 
-    @abstractmethod
-    def evaluate(self, world_state) -> ConstraintResult:
-        pass
+    severity: str = "info"
