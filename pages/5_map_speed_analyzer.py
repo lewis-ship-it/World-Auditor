@@ -51,7 +51,6 @@ st.sidebar.header("Track Settings")
 track_length_meters = st.sidebar.number_input(
     "Total Track Length (meters)",
     min_value=1.0,
-    max_value=10000.0,
     value=100.0
 )
 
