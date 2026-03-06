@@ -1,8 +1,12 @@
-import streamlit as st
+import sys
+import os
 
+# Add the root directory to the sys.path so sub-pages can find 'alignment_core' and 'ui'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# NOW you can do your imports
 from ui.engine_builder import build_engine
-from ui.world_builder import build_world
-
+from alignment_core.constraints.braking import BrakingConstraint
 st.title("Safety Audit")
 
 velocity = st.slider("Velocity",0.0,15.0,4.0)
