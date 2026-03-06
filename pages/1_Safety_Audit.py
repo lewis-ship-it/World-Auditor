@@ -12,4 +12,4 @@ if root_dir not in sys.path:
 # 2. NOW perform your imports
 import streamlit as st
 from ui.engine_builder import build_engine
-from alignment_core.constraints.braking import BrakingConstraint
+from alignment_core.deterministic_kernel.braking import BrakingConstraint
