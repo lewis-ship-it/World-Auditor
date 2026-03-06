@@ -3,64 +3,213 @@ import numpy as np
 import cv2
 import plotly.graph_objects as go
 from PIL import Image
-
-from alignment_core.physics.physics_engine import PhysicsEngine
-from alignment_core.perception.map_segmentation import segment_track
+import math
+import time
 
 st.title("🗺️ Map Speed Analyzer")
 
-st.markdown("Analyze robot traversal speed across a map.")
+st.markdown("""
+Upload a **track map** and enter the **real world track length**.
 
-friction = st.sidebar.slider("Surface Friction",0.1,1.5,0.8)
+The system will:
 
-engine = PhysicsEngine(friction)
+• Convert the image into a track path  
+• Estimate curvature along the route  
+• Compute safe robot speeds  
+• Calculate braking distances  
+• Estimate total traversal time  
+• Animate the robot moving along the path
+""")
 
-track_length = st.sidebar.number_input("Track Length (meters)",100,100000,5000)
+# -----------------------------
+# SIDEBAR ROBOT SETTINGS
+# -----------------------------
 
-uploaded_file = st.file_uploader("Upload Track Map")
+st.sidebar.header("Robot Physics")
+
+mass = st.sidebar.number_input("Robot Mass (kg)", 1.0, 500.0, 40.0)
+
+wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 3.0, 0.6)
+
+friction = st.sidebar.slider("Surface Friction", 0.1, 1.2, 0.8)
+
+max_brake = st.sidebar.number_input("Max Brake m/s²", 0.1, 20.0, 6.0)
+
+max_accel = st.sidebar.number_input("Max Acceleration m/s²", 0.1, 20.0, 3.0)
+
+# -----------------------------
+# TRACK SETTINGS
+# -----------------------------
+
+st.sidebar.header("Track Settings")
+
+track_length_meters = st.sidebar.number_input(
+    "Total Track Length (meters)",
+    min_value=1.0,
+    max_value=10000.0,
+    value=100.0
+)
+
+# -----------------------------
+# MAP UPLOAD
+# -----------------------------
+
+uploaded_file = st.file_uploader("Upload Track Map Image")
 
 if uploaded_file:
 
     image = Image.open(uploaded_file)
+    image = image.convert("RGB")
 
-    st.image(image)
+    st.image(image, caption="Uploaded Track")
 
-    img = np.array(image)
+    img = np.array(image).astype("uint8")
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Convert to grayscale safely
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-    edges = cv2.Canny(gray,50,150)
+    # Edge detection
+    edges = cv2.Canny(gray, 60, 120)
 
-    y,x = np.where(edges>0)
+    st.subheader("Detected Track Edges")
 
-    points = np.column_stack((x,y))
+    st.image(edges)
 
-    if len(points)>2000:
-        points = points[::20]
+    # -----------------------------
+    # EXTRACT TRACK POINTS
+    # -----------------------------
 
-    segments = segment_track(points)
+    y_coords, x_coords = np.where(edges > 0)
+
+    points = np.column_stack((x_coords, y_coords))
+
+    if len(points) < 20:
+
+        st.error("Track detection failed. Upload a clearer map.")
+        st.stop()
+
+    # Downsample to keep processing light
+    points = points[::60]
+
+    # Sort path left → right
+    points = points[points[:, 0].argsort()]
+
+    xs = points[:, 0]
+    ys = points[:, 1]
+
+    # -----------------------------
+    # COMPUTE PIXEL PATH LENGTH
+    # -----------------------------
+
+    pixel_length = 0
+
+    for i in range(len(points) - 1):
+
+        p1 = points[i]
+        p2 = points[i + 1]
+
+        pixel_length += np.linalg.norm(p2 - p1)
+
+    meters_per_pixel = track_length_meters / pixel_length
+
+    st.success(f"Scale: {meters_per_pixel:.4f} meters per pixel")
+
+    # -----------------------------
+    # CURVATURE ANALYSIS
+    # -----------------------------
+
+    curvatures = []
+
+    for i in range(1, len(points) - 1):
+
+        p1 = points[i - 1]
+        p2 = points[i]
+        p3 = points[i + 1]
+
+        a = np.linalg.norm(p2 - p1)
+        b = np.linalg.norm(p3 - p2)
+        c = np.linalg.norm(p3 - p1)
+
+        if a * b * c == 0:
+            curvatures.append(0)
+            continue
+
+        curvature = abs(
+            4 * np.sqrt(
+                max(
+                    0,
+                    (a + b - c)
+                    * (a - b + c)
+                    * (-a + b + c)
+                    * (a + b + c)
+                )
+            )
+            / (a * b * c)
+        )
+
+        curvatures.append(curvature)
+
+    curvatures = np.array(curvatures)
+
+    curvatures = curvatures / (curvatures.max() + 1e-6)
+
+    # -----------------------------
+    # SPEED MODEL
+    # -----------------------------
+
+    g = 9.81
+
+    max_curve_speed = math.sqrt(friction * g * wheelbase)
 
     speeds = []
 
-    for i in range(1,len(points)-1):
+    for k in curvatures:
 
-        p1 = points[i-1]
-        p2 = points[i]
-        p3 = points[i+1]
+        speed = max_curve_speed * (1 - k)
 
-        a = np.linalg.norm(p2-p1)
-        b = np.linalg.norm(p3-p2)
-        c = np.linalg.norm(p3-p1)
+        speed = max(speed, 0.5)
 
-        if a*b*c == 0:
-            speeds.append(0)
-            continue
+        speeds.append(speed)
 
-        radius = (a*b*c)/np.sqrt(abs((a+b+c)*(b+c-a)*(c+a-b)*(a+b-c)))
+    speeds = np.array(speeds)
 
-        vmax = engine.max_corner_speed(radius)
+    # -----------------------------
+    # BRAKING DISTANCE
+    # -----------------------------
 
-        speeds.append(vmax)
+    braking_distances = []
+
+    for v in speeds:
+
+        stop_dist = (v ** 2) / (2 * max_brake)
+
+        braking_distances.append(stop_dist)
+
+    braking_distances = np.array(braking_distances)
+
+    # -----------------------------
+    # DISTANCE ALONG TRACK
+    # -----------------------------
+
+    distances = []
+
+    total = 0
+
+    for i in range(len(points) - 1):
+
+        segment = np.linalg.norm(points[i + 1] - points[i])
+
+        segment_meters = segment * meters_per_pixel
+
+        total += segment_meters
+
+        distances.append(total)
+
+    distances = np.array(distances)
+
+    # -----------------------------
+    # SPEED GRAPH
+    # -----------------------------
 
     st.subheader("Speed Profile")
 
@@ -68,17 +217,87 @@ if uploaded_file:
 
     fig.add_trace(
         go.Scatter(
+            x=distances,
             y=speeds,
-            mode="lines"
+            mode="lines",
+            name="Speed m/s"
         )
     )
 
-    st.plotly_chart(fig)
+    fig.update_layout(
+        xaxis_title="Distance Along Track (m)",
+        yaxis_title="Speed (m/s)"
+    )
 
-    st.subheader("Track Segments")
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.write({
-        "straights":segments.count("straight"),
-        "curves":segments.count("curve"),
-        "hairpins":segments.count("hairpin")
-    })
+    # -----------------------------
+    # BRAKING GRAPH
+    # -----------------------------
+
+    st.subheader("Braking Distance")
+
+    fig2 = go.Figure()
+
+    fig2.add_trace(
+        go.Scatter(
+            x=distances,
+            y=braking_distances,
+            mode="lines",
+            name="Braking Distance"
+        )
+    )
+
+    fig2.update_layout(
+        xaxis_title="Distance Along Track (m)",
+        yaxis_title="Braking Distance (m)"
+    )
+
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # -----------------------------
+    # ESTIMATED TRAVEL TIME
+    # -----------------------------
+
+    avg_speed = speeds.mean()
+
+    total_time = track_length_meters / avg_speed
+
+    st.metric("Estimated Traversal Time", f"{total_time:.2f} seconds")
+
+    # -----------------------------
+    # ROBOT ANIMATION
+    # -----------------------------
+
+    st.subheader("Robot Simulation")
+
+    placeholder = st.empty()
+
+    for i in range(len(xs)):
+
+        fig_anim = go.Figure()
+
+        fig_anim.add_trace(
+            go.Scatter(
+                x=xs,
+                y=ys,
+                mode="lines",
+                line=dict(color="gray")
+            )
+        )
+
+        fig_anim.add_trace(
+            go.Scatter(
+                x=[xs[i]],
+                y=[ys[i]],
+                mode="markers",
+                marker=dict(size=12),
+                name="Robot"
+            )
+        )
+
+        fig_anim.update_layout(height=500, showlegend=False)
+
+        placeholder.plotly_chart(fig_anim, use_container_width=True)
+
+        time.sleep(0.015)
