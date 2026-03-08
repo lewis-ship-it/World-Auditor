@@ -3,137 +3,79 @@ import numpy as np
 import cv2
 import plotly.graph_objects as go
 from PIL import Image
-import math
 from sklearn.neighbors import NearestNeighbors
 
-# --- IMPROVED SORTING (With Distance Cap) ---
+# --- THE NEW CONTOUR-BASED EXTRACTOR ---
 
-def sort_points_sequentially(pts):
-    """Sorts points with a 'jump' protection to prevent cross-track scattering."""
-    if len(pts) < 2: return pts
+def extract_clean_path(image_np, thresh_val):
+    # 1. Convert to grayscale and blur to remove tiny speckles
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     
-    sorted_pts = [pts[0]]
-    remaining_pts = pts[1:].tolist()
+    # 2. Thresholding
+    _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY_INV)
     
-    # Maximum allowed distance to the next point (prevents jumping across the map)
-    # We set this based on a small percentage of the total image width
-    max_jump = 50 
-
-    while remaining_pts:
-        last_pt = sorted_pts[-1]
-        nn = NearestNeighbors(n_neighbors=1).fit(remaining_pts)
-        dist, idx = nn.kneighbors([last_pt])
-        
-        # If the nearest point is too far, it's likely a different part of the track
-        # We stop or look for a closer cluster instead of jumping
-        if dist[0][0] > max_jump and len(remaining_pts) > 1:
-             # Try to find a point that isn't a massive leap
-             break 
-             
-        sorted_pts.append(remaining_pts.pop(idx[0][0]))
-        
-    return np.array(sorted_pts)
-
-# --- PHYSICS LOGIC ---
-
-def get_physics_metrics(curvatures, friction, wheelbase, mass):
-    g = 9.81
-    track_width = wheelbase * 0.7
-    cog_h = 0.45 
+    # 3. Find CONTOURS (Continuous shapes)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    speeds = []
-    for k in curvatures:
-        radius = 1.0 / k if k > 0.0001 else 1000.0
-        v_sliding = math.sqrt(friction * g * radius)
-        v_tipping = math.sqrt((g * (track_width / 2) * radius) / cog_h)
-        speeds.append(min(v_sliding, v_tipping))
+    if not contours:
+        return None
+
+    # 4. Pick the LARGEST contour (the track) and ignore the rest (noise/text)
+    main_track = max(contours, key=cv2.contourArea)
     
-    speeds = np.array(speeds)
-    energy = np.abs(np.gradient(0.5 * mass * speeds**2)) + (0.05 * mass * g)
-    return speeds, energy
+    # 5. Smooth the contour to remove "pixel jitter"
+    epsilon = 0.005 * cv2.arcLength(main_track, True)
+    approx_path = cv2.approxPolyDP(main_track, epsilon, True)
+    
+    # Reshape for our physics logic
+    return approx_path.reshape(-1, 2)
 
-# --- UI ---
+# --- PHYSICS & UI ---
 
-st.set_page_config(page_title="SafeBot Resilient Auditor", layout="wide")
-st.title("🗺️ Resilient Map Speed Analyzer")
+st.set_page_config(page_title="SafeBot Contour Auditor", layout="wide")
+st.title("🗺️ Contour-Based Map Auditor")
 
-st.sidebar.header("Settings")
-friction = st.sidebar.slider("Surface Friction (μ)", 0.1, 1.2, 0.8)
-track_len = st.sidebar.number_input("Track Length (m)", 1.0, 5000.0, 100.0)
-# ADDED: Sensitivity slider to help the user clean up their specific map
+st.sidebar.header("Processing Settings")
+# This slider is key: move it until the "noise" disappears in the preview
 thresh_val = st.sidebar.slider("Map Sensitivity (Threshold)", 0, 255, 127)
+show_binary = st.sidebar.checkbox("Show AI's view of the track", value=False)
 
 uploaded_file = st.file_uploader("Upload Track Map")
 
 if uploaded_file:
     img_pil = Image.open(uploaded_file).convert("RGB")
     img_np = np.array(img_pil)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     
-    # 1. DENOISING: Remove small dots/text that confuse the skeleton
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
-    # 2. THRESHOLDING: Create the binary mask
-    _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY_INV)
-    
-    # 3. CLEANING: Remove noise smaller than 3x3 pixels
-    kernel = np.ones((3,3), np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    # Show what the computer "sees" to help the user adjust the slider
+    if show_binary:
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        _, b_view = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+        st.image(b_view, caption="AI's Binary View (Track should be solid White)", width=400)
 
-    # 4. SKELETONIZATION
-    # Requires opencv-contrib-python-headless
-    try:
-        skeleton = cv2.ximgproc.thinning(binary)
-    except AttributeError:
-        st.error("Missing 'opencv-contrib-python-headless'. Please check requirements.txt")
-        st.stop()
+    pts = extract_clean_path(img_np, thresh_val)
     
-    y_c, x_c = np.where(skeleton > 0)
-    pts = np.column_stack((x_c, y_c))
-    
-    if len(pts) > 50:
-        # 5. DYNAMIC DOWNSAMPLING
-        # We take every Nth point to keep the UI fast but the curves smooth
-        pts = pts[::10] 
-        pts = sort_points_sequentially(pts)
+    if pts is not None and len(pts) > 5:
+        # Since contours are already ordered, we don't even need the complex sort!
+        xs, ys = pts[:, 0], pts[:, 1]
         
-        # Calculate Scale
-        pixel_dist = sum(np.linalg.norm(pts[i+1]-pts[i]) for i in range(len(pts)-1))
-        m_px = track_len / pixel_dist
-        
-        # Curvature & Metrics
-        curvatures = []
-        for i in range(1, len(pts)-1):
-            p1, p2, p3 = pts[i-1], pts[i], pts[i+1]
-            a, b, c = np.linalg.norm(p2-p1), np.linalg.norm(p3-p2), np.linalg.norm(p3-p1)
-            if a*b*c == 0: curvatures.append(0); continue
-            k = abs(4 * np.sqrt(max(0, (a+b-c)*(a-b+c)*(-a+b+c)*(a+b+c))) / (a*b*c))
-            curvatures.append(k / m_px)
-        
-        speeds, energy = get_physics_metrics(np.array(curvatures), friction, 0.6, 40.0)
-        dist_axis = np.cumsum([np.linalg.norm(pts[i+1]-pts[i])*m_px for i in range(len(pts)-2)])
-
-        # 6. VISUALIZATION
+        # Visualize on Map
         map_fig = go.Figure()
         map_fig.add_trace(go.Scatter(
-            x=pts[1:-1, 0], y=pts[1:-1, 1],
-            mode='lines+markers',
-            marker=dict(size=6, color=speeds, colorscale="Viridis", showscale=True),
-            line=dict(color="white", width=1)
+            x=xs, y=ys, mode='lines+markers',
+            line=dict(color='cyan', width=3),
+            marker=dict(size=4, color='white')
         ))
-
+        
         map_fig.update_layout(
-            images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(pts[:, 1]),
-                         sizex=max(pts[:, 0]), sizey=max(pts[:, 1]),
-                         sizing="stretch", opacity=0.3, layer="below")],
+            images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(ys),
+                         sizex=max(xs), sizey=max(ys),
+                         sizing="stretch", opacity=0.5, layer="below")],
             xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
             template="plotly_dark", height=600
         )
         st.plotly_chart(map_fig, use_container_width=True)
-
-        # Graph
-        graph_fig = go.Figure(go.Scatter(x=dist_axis, y=speeds, mode='lines'))
-        graph_fig.update_layout(title="Speed Profile", template="plotly_dark")
-        st.plotly_chart(graph_fig, use_container_width=True)
+        
+        st.success(f"✅ Track successfully isolated with {len(pts)} key points.")
     else:
-        st.warning("Adjust the 'Map Sensitivity' slider until the track appears clearly.")
+        st.error("No track detected. Try adjusting the 'Map Sensitivity' slider.")
