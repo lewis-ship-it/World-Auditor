@@ -3,58 +3,49 @@ import numpy as np
 import cv2
 import plotly.graph_objects as go
 from PIL import Image
-import math
 from sklearn.neighbors import NearestNeighbors
 
-# --- THE HYBRID EXTRACTOR ---
+# --- THE TRACING ENGINE ---
 
-def extract_hybrid_path(image_np, thresh_val):
-    # 1. Pre-process
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+def trace_path_from_binary(binary_img):
+    """Traces the center of the white shape found in the binary image."""
+    # 1. Clean the binary image to ensure the track is solid
+    kernel = np.ones((5,5), np.uint8)
+    binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
     
-    # 2. Binary Threshold (The "Perfect View" you saw)
-    _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY_INV)
+    # 2. Skeletonize to find the 'spine'
+    skeleton = cv2.ximgproc.thinning(binary_img)
     
-    # 3. Noise Removal: Only keep the largest solid object (The Track)
-    # This deletes all the "trash" dots/text
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if num_labels <= 1: return None
-    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-    binary_cleaned = np.zeros_like(binary)
-    binary_cleaned[labels == largest_label] = 255
+    # 3. Get all spine points
+    y_indices, x_indices = np.where(skeleton > 0)
+    if len(x_indices) < 10: return None
+    points = np.column_stack((x_indices, y_indices))
 
-    # 4. Skeletonization: Find the center-line of that one largest shape
-    skeleton = cv2.ximgproc.thinning(binary_cleaned)
+    # 4. Sequential Trace: Instead of random sorting, we walk the path
+    path = [points[0]]
+    unused_points = points[1:].tolist()
     
-    # 5. Extract Points from the spine
-    y_c, x_c = np.where(skeleton > 0)
-    pts = np.column_stack((x_c, y_c))
-    
-    if len(pts) < 10: return None
-
-    # 6. Final Sequence Sort
-    # Since it's a 1-pixel spine, the proximity sort will now be perfect
-    return sort_points_sequentially(pts[::10]) # Downsample by 10 for smoothness
-
-def sort_points_sequentially(pts):
-    if len(pts) < 2: return pts
-    sorted_pts = [pts[0]]
-    remaining_pts = pts[1:].tolist()
-    while remaining_pts:
-        last_pt = sorted_pts[-1]
-        nn = NearestNeighbors(n_neighbors=1).fit(remaining_pts)
+    while unused_points and len(path) < 1000:
+        last_pt = path[-1]
+        # Find points within a reasonable 'step' distance
+        nn = NearestNeighbors(n_neighbors=1).fit(unused_points)
         dist, idx = nn.kneighbors([last_pt])
-        sorted_pts.append(remaining_pts.pop(idx[0][0]))
-    return np.array(sorted_pts)
+        
+        # If the next point is too far (>30px), we've reached the end of a segment
+        if dist[0][0] > 30:
+            break
+            
+        path.append(unused_points.pop(idx[0][0]))
+        
+    return np.array(path)
 
-# --- FULL APP LOGIC ---
+# --- UI & LOGIC ---
 
-st.set_page_config(page_title="SafeBot Hybrid Auditor", layout="wide")
-st.title("🗺️ Hybrid Map Speed Analyzer")
+st.set_page_config(page_title="AI Trace Auditor", layout="wide")
+st.title("🗺️ AI-View Path Tracer")
 
-st.sidebar.header("Processing Settings")
-thresh_val = st.sidebar.slider("Map Sensitivity", 0, 255, 127)
+st.sidebar.header("AI Vision Tuning")
+thresh_val = st.sidebar.slider("Sensitivity", 0, 255, 127)
 track_len = st.sidebar.number_input("Track Length (m)", 1.0, 5000.0, 100.0)
 
 uploaded_file = st.file_uploader("Upload Track Map")
@@ -63,43 +54,42 @@ if uploaded_file:
     img_pil = Image.open(uploaded_file).convert("RGB")
     img_np = np.array(img_pil)
     
-    # Run the Hybrid Extraction
-    pts = extract_hybrid_path(img_np, thresh_val)
+    # Generate the "Perfect View"
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+    
+    # Show the Binary View so you can tune it
+    st.subheader("AI Vision (The 'Perfect View')")
+    st.image(binary, width=400, caption="Tune sensitivity until the track is a solid white line.")
+
+    # TRACE THE MAP
+    pts = trace_path_from_binary(binary)
     
     if pts is not None:
         xs, ys = pts[:, 0], pts[:, 1]
         
-        # Calculate Curvature & Physics (Integrated)
-        pixel_dist = sum(np.linalg.norm(pts[i+1]-pts[i]) for i in range(len(pts)-1))
-        m_px = track_len / pixel_dist
-        
-        curvatures = []
-        for i in range(1, len(pts)-1):
-            p1, p2, p3 = pts[i-1], pts[i], pts[i+1]
-            a, b, c = np.linalg.norm(p2-p1), np.linalg.norm(p3-p2), np.linalg.norm(p3-p1)
-            if a*b*c == 0: curvatures.append(0); continue
-            k = abs(4 * np.sqrt(max(0, (a+b-c)*(a-b+c)*(-a+b+c)*(a+b+c))) / (a*b*c))
-            curvatures.append(k / m_px)
-        
-        # Simple Speed Model
-        speeds = [math.sqrt(0.8 * 9.81 * (1.0/k if k > 0.001 else 1000.0)) for k in curvatures]
-        
-        # Map Visualization
+        # Draw the Interactive Map
         map_fig = go.Figure()
+        
+        # The Trace Line
         map_fig.add_trace(go.Scatter(
             x=xs, y=ys, mode='lines+markers',
-            marker=dict(size=6, color=speeds, colorscale="Viridis", showscale=True),
-            line=dict(color="rgba(255,255,255,0.3)", width=2)
+            line=dict(color='cyan', width=4),
+            marker=dict(size=4, color='white'),
+            name="AI Trace"
         ))
-        
+
         map_fig.update_layout(
             images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(ys),
                          sizex=max(xs), sizey=max(ys),
-                         sizing="stretch", opacity=0.4, layer="below")],
+                         sizing="stretch", opacity=0.3, layer="below")],
             xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
-            template="plotly_dark", height=600
+            template="plotly_dark", height=600,
+            margin=dict(l=0, r=0, t=0, b=0)
         )
+        
+        st.subheader("Interactive Audit Map")
         st.plotly_chart(map_fig, use_container_width=True)
-        st.success("✅ Path extracted using Hybrid Center-Line detection.")
+        st.success(f"✅ AI successfully traced {len(pts)} points along the track spine.")
     else:
-        st.error("Could not isolate the track center-line. Try adjusting Map Sensitivity.")
+        st.error("Trace failed. Ensure the track is a continuous white line in the AI Vision view.")
