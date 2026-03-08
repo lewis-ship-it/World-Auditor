@@ -1,23 +1,48 @@
-def compute_effective_friction(world_state):
-    """
-    Computes the effective friction coefficient for the primary agent.
-    """
+import math
+from .base import Constraint, ConstraintResult
 
-    agent = world_state.primary_agent()
-    env = world_state.environment
+class FrictionConstraint(Constraint):
+    name = "Surface Traction"
+    severity = "hard"
 
-    base_friction = agent.friction
-    modifier = env.friction_modifier
+    def evaluate(self, world_state):
+        results = []
+        # AI Perception Mapping: Translates visual labels to physics constants
+        friction_map = {
+            "dry_concrete": 0.85,
+            "wet_concrete": 0.45,
+            "polished_tile": 0.30,
+            "ice": 0.10,
+            "loose_gravel": 0.35,
+            "default": world_state.environment.friction
+        }
 
-    effective_friction = base_friction * modifier
+        # Check if environment has an AI-detected surface, else use manual slider
+        surface = getattr(world_state.environment, 'surface_type', 'default')
+        mu = friction_map.get(surface, world_state.environment.friction)
 
-    if env.surface == "wet":
-        effective_friction *= 0.7
+        for agent in world_state.agents:
+            # Calculate required friction for the current acceleration
+            # Simplified: mu_required = |a| / g
+            # For cornering: mu_required = v^2 / (R * g)
+            v = math.sqrt(agent.velocity.x**2 + agent.velocity.y**2)
+            
+            # Estimate deceleration required to stop in available distance
+            dist = world_state.environment.distance_to_obstacles
+            required_accel = (v**2) / (2 * dist) if dist > 0 else 9.81
+            mu_required = required_accel / 9.81
 
-    if env.surface == "ice":
-        effective_friction *= 0.3
+            violated = mu_required > mu
 
-    if env.surface == "sand":
-        effective_friction *= 0.8
-
-    return max(0.05, effective_friction)
+            results.append(ConstraintResult(
+                self.name,
+                violated,
+                self.severity,
+                {
+                    "surface_detected": surface,
+                    "available_friction": mu,
+                    "required_friction": round(mu_required, 2),
+                    "status": "SLIP RISK" if violated else "STABLE"
+                }
+            ))
+        return results

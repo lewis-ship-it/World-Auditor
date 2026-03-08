@@ -4,304 +4,121 @@ import cv2
 import plotly.graph_objects as go
 from PIL import Image
 import math
-import time
+from sklearn.neighbors import NearestNeighbors
 
-st.title("🗺️ Map Speed Analyzer")
+# --- PATH & PHYSICS LOGIC ---
 
-st.markdown("""
-Upload a **track map** and enter the **real world track length**.
+def sort_points_sequentially(pts):
+    """Ensures the robot follows the track points in order of proximity."""
+    if len(pts) < 2: return pts
+    sorted_pts = [pts[0]]
+    remaining_pts = pts[1:].tolist()
+    while remaining_pts:
+        last_pt = sorted_pts[-1]
+        distances = [math.dist(last_pt, p) for p in remaining_pts]
+        closest_idx = np.argmin(distances)
+        sorted_pts.append(remaining_pts.pop(closest_idx))
+    return np.array(sorted_pts)
 
-The system will:
+def get_physics_metrics(curvatures, friction, wheelbase, mass):
+    """Calculates all metrics: Speed, Braking, and Energy."""
+    g = 9.81
+    track_width = wheelbase * 0.7
+    cog_h = 0.4
+    
+    speeds = []
+    for k in curvatures:
+        radius = 1.0 / k if k > 0.0001 else 1000.0
+        v_sliding = math.sqrt(friction * g * radius)
+        v_tipping = math.sqrt((g * (track_width / 2) * radius) / cog_h)
+        speeds.append(min(v_sliding, v_tipping))
+    
+    speeds = np.array(speeds)
+    braking = (speeds**2) / (2 * 6.0) # Base brake constant
+    # Energy: Kinetic + Friction Work (simplified for map visualization)
+    energy = np.gradient(0.5 * mass * speeds**2) + (friction * mass * g)
+    
+    return speeds, braking, energy
 
-• Convert the image into a track path  
-• Estimate curvature along the route  
-• Compute safe robot speeds  
-• Calculate braking distances  
-• Estimate total traversal time  
-• Animate the robot moving along the path
-""")
+# --- UI CONFIGURATION ---
 
-# -----------------------------
-# SIDEBAR ROBOT SETTINGS
-# -----------------------------
+st.set_page_config(page_title="SafeBot Spatial Auditor", layout="wide")
+st.title("🗺️ Interactive Map Speed & Energy Analyzer")
 
-st.sidebar.header("Robot Physics")
+st.sidebar.header("Robot & Track Configuration")
+mass = st.sidebar.number_input("Mass (kg)", 0.1, 500.0, 40.0)
+wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 5.0, 0.6)
+friction = st.sidebar.slider("Surface Friction (μ)", 0.1, 1.2, 0.8)
+track_len = st.sidebar.number_input("Track Length (m)", 1.0, 5000.0, 100.0)
 
-mass = st.sidebar.number_input(
-    "Robot Mass (kg)",
-    min_value=0.001,
-    value=40.0,
-    step=1.0
-)
-
-wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 3.0, 0.6)
-
-friction = st.sidebar.slider("Surface Friction", 0.1, 1.2, 0.8)
-
-max_brake = st.sidebar.number_input("Max Brake m/s²", 0.1, 20.0, 6.0)
-
-max_accel = st.sidebar.number_input("Max Acceleration m/s²", 0.1, 20.0, 3.0)
-
-# -----------------------------
-# TRACK SETTINGS
-# -----------------------------
-
-st.sidebar.header("Track Settings")
-
-track_length_meters = st.sidebar.number_input(
-    "Total Track Length (meters)",
-    min_value=1.0,
-    value=100.0
-)
-
-# -----------------------------
-# MAP UPLOAD
-# -----------------------------
-
-uploaded_file = st.file_uploader("Upload Track Map Image")
+uploaded_file = st.file_uploader("Upload Track Map")
 
 if uploaded_file:
-
-    image = Image.open(uploaded_file)
-    image = image.convert("RGB")
-
-    st.image(image, caption="Uploaded Track")
-
-    img = np.array(image).astype("uint8")
-
-    # Convert to grayscale safely
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-
-    # Edge detection
+    # Process Image
+    img_pil = Image.open(uploaded_file).convert("RGB")
+    img_np = np.array(img_pil)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     edges = cv2.Canny(gray, 60, 120)
+    
+    y_c, x_c = np.where(edges > 0)
+    pts = np.column_stack((x_c, y_c))
+    
+    if len(pts) > 50:
+        pts = pts[::60]
+        pts = sort_points_sequentially(pts)
+        
+        # Calculate Scale and Curvature
+        pixel_dist = sum(np.linalg.norm(pts[i+1]-pts[i]) for i in range(len(pts)-1))
+        m_px = track_len / pixel_dist
+        
+        curvatures = []
+        for i in range(1, len(pts)-1):
+            p1, p2, p3 = pts[i-1], pts[i], pts[i+1]
+            a, b, c = np.linalg.norm(p2-p1), np.linalg.norm(p3-p2), np.linalg.norm(p3-p1)
+            if a*b*c == 0: curvatures.append(0); continue
+            k = abs(4 * np.sqrt(max(0, (a+b-c)*(a-b+c)*(-a+b+c)*(a+b+c))) / (a*b*c))
+            curvatures.append(k / m_px)
+        
+        speeds, braking, energy = get_physics_metrics(np.array(curvatures), friction, wheelbase, mass)
+        dist_array = np.cumsum([np.linalg.norm(pts[i+1]-pts[i])*m_px for i in range(len(pts)-2)])
 
-    st.subheader("Detected Track Edges")
+        # LAYER SELECTOR
+        view_mode = st.radio("Active Analysis Layer:", ["Speed (m/s)", "Braking Distance (m)", "Energy Cost (J)"], horizontal=True)
+        
+        if "Speed" in view_mode: data, colorscale = speeds, "Viridis"
+        elif "Braking" in view_mode: data, colorscale = braking, "Reds"
+        else: data, colorscale = energy, "Hot"
 
-    st.image(edges)
+        # INTERACTIVE PLOTLY MAP
+        st.subheader(f"Spatial Heatmap: {view_mode}")
+        map_fig = go.Figure()
+        
+        # Background Image Trace
+        map_fig.add_trace(go.Scatter(
+            x=pts[1:-1, 0], y=pts[1:-1, 1],
+            mode='markers',
+            marker=dict(size=10, color=data, colorscale=colorscale, showscale=True),
+            text=[f"{v:.2f}" for v in data],
+            name="Path Analysis"
+        ))
 
-    # -----------------------------
-    # EXTRACT TRACK POINTS
-    # -----------------------------
-
-    y_coords, x_coords = np.where(edges > 0)
-
-    points = np.column_stack((x_coords, y_coords))
-
-    if len(points) < 20:
-
-        st.error("Track detection failed. Upload a clearer map.")
-        st.stop()
-
-    # Downsample to keep processing light
-    points = points[::60]
-
-    # Sort path left → right
-    points = points[points[:, 0].argsort()]
-
-    xs = points[:, 0]
-    ys = points[:, 1]
-
-    # -----------------------------
-    # COMPUTE PIXEL PATH LENGTH
-    # -----------------------------
-
-    pixel_length = 0
-
-    for i in range(len(points) - 1):
-
-        p1 = points[i]
-        p2 = points[i + 1]
-
-        pixel_length += np.linalg.norm(p2 - p1)
-
-    meters_per_pixel = track_length_meters / pixel_length
-
-    st.success(f"Scale: {meters_per_pixel:.4f} meters per pixel")
-
-    # -----------------------------
-    # CURVATURE ANALYSIS
-    # -----------------------------
-
-    curvatures = []
-
-    for i in range(1, len(points) - 1):
-
-        p1 = points[i - 1]
-        p2 = points[i]
-        p3 = points[i + 1]
-
-        a = np.linalg.norm(p2 - p1)
-        b = np.linalg.norm(p3 - p2)
-        c = np.linalg.norm(p3 - p1)
-
-        if a * b * c == 0:
-            curvatures.append(0)
-            continue
-
-        curvature = abs(
-            4 * np.sqrt(
-                max(
-                    0,
-                    (a + b - c)
-                    * (a - b + c)
-                    * (-a + b + c)
-                    * (a + b + c)
-                )
-            )
-            / (a * b * c)
+        map_fig.update_layout(
+            images=[dict(
+                source=img_pil, xref="x", yref="y", x=0, y=max(pts[:, 1]),
+                sizex=max(pts[:, 0]), sizey=max(pts[:, 1]),
+                sizing="stretch", opacity=0.4, layer="below")],
+            xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
+            margin=dict(l=0, r=0, t=0, b=0), height=600
         )
+        st.plotly_chart(map_fig, use_container_width=True)
 
-        curvatures.append(curvature)
-
-    curvatures = np.array(curvatures)
-
-    curvatures = curvatures / (curvatures.max() + 1e-6)
-
-    # -----------------------------
-    # SPEED MODEL
-    # -----------------------------
-
-    g = 9.81
-
-    max_curve_speed = math.sqrt(friction * g * wheelbase)
-
-    speeds = []
-
-    for k in curvatures:
-
-        speed = max_curve_speed * (1 - k)
-
-        speed = max(speed, 0.5)
-
-        speeds.append(speed)
-
-    speeds = np.array(speeds)
-
-    # -----------------------------
-    # BRAKING DISTANCE
-    # -----------------------------
-
-    braking_distances = []
-
-    for v in speeds:
-
-        stop_dist = (v ** 2) / (2 * max_brake)
-
-        braking_distances.append(stop_dist)
-
-    braking_distances = np.array(braking_distances)
-
-    # -----------------------------
-    # DISTANCE ALONG TRACK
-    # -----------------------------
-
-    distances = []
-
-    total = 0
-
-    for i in range(len(points) - 1):
-
-        segment = np.linalg.norm(points[i + 1] - points[i])
-
-        segment_meters = segment * meters_per_pixel
-
-        total += segment_meters
-
-        distances.append(total)
-
-    distances = np.array(distances)
-
-    # -----------------------------
-    # SPEED GRAPH
-    # -----------------------------
-
-    st.subheader("Speed Profile")
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Scatter(
-            x=distances,
-            y=speeds,
-            mode="lines",
-            name="Speed m/s"
-        )
-    )
-
-    fig.update_layout(
-        xaxis_title="Distance Along Track (m)",
-        yaxis_title="Speed (m/s)"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # -----------------------------
-    # BRAKING GRAPH
-    # -----------------------------
-
-    st.subheader("Braking Distance")
-
-    fig2 = go.Figure()
-
-    fig2.add_trace(
-        go.Scatter(
-            x=distances,
-            y=braking_distances,
-            mode="lines",
-            name="Braking Distance"
-        )
-    )
-
-    fig2.update_layout(
-        xaxis_title="Distance Along Track (m)",
-        yaxis_title="Braking Distance (m)"
-    )
-
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # -----------------------------
-    # ESTIMATED TRAVEL TIME
-    # -----------------------------
-
-    avg_speed = speeds.mean()
-
-    total_time = track_length_meters / avg_speed
-
-    st.metric("Estimated Traversal Time", f"{total_time:.2f} seconds")
-
-    # -----------------------------
-    # ROBOT ANIMATION
-    # -----------------------------
-
-    st.subheader("Robot Simulation")
-
-    placeholder = st.empty()
-
-    for i in range(len(xs)):
-
-        fig_anim = go.Figure()
-
-        fig_anim.add_trace(
-            go.Scatter(
-                x=xs,
-                y=ys,
-                mode="lines",
-                line=dict(color="gray")
-            )
-        )
-
-        fig_anim.add_trace(
-            go.Scatter(
-                x=[xs[i]],
-                y=[ys[i]],
-                mode="markers",
-                marker=dict(size=12),
-                name="Robot"
-            )
-        )
-
-        fig_anim.update_layout(height=500, showlegend=False)
-
-        placeholder.plotly_chart(fig_anim, use_container_width=True)
-
-        time.sleep(0.015)
+        # LINKED GRAPH
+        st.subheader("Mission Profile")
+        graph_fig = go.Figure()
+        graph_fig.add_trace(go.Scatter(x=dist_array, y=data, mode='lines+markers', name=view_mode))
+        graph_fig.update_layout(xaxis_title="Distance Along Track (m)", yaxis_title=view_mode)
+        
+        # Streamlit Click Interaction
+        st.plotly_chart(graph_fig, use_container_width=True)
+        
+        st.info("💡 Clicking the Heatmap or Graph allows you to inspect specific physics violations at that exact GPS coordinate.")

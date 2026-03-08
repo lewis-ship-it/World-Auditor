@@ -1,4 +1,17 @@
 from ..world_model.primitives import Vector3
+def calculate_dynamic_normal_forces(mass, acceleration, com_height, wheelbase):
+    """
+    Calculates how weight shifts from rear to front during braking/acceleration.
+    """
+    g = 9.81
+    static_weight = (mass * g) / 2
+    # Weight transfer formula: (mass * acceleration * com_height) / wheelbase
+    transfer = (mass * abs(acceleration) * com_height) / wheelbase
+    
+    front_n = static_weight + transfer
+    rear_n = static_weight - transfer
+    
+    return max(0, front_n), max(0, rear_n)
 
 def calculate_auto_cog(chassis_mass, chassis_h, battery_mass, battery_h, load_mass, load_h):
     """Calculates composite CoG height by summing mass moments."""

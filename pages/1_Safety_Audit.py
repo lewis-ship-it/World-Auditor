@@ -1,287 +1,125 @@
+import sys
+import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from alignment_core.engine.safety_engine import SafetyEngine
-from alignment_core.constraints.braking import BrakingConstraint
+# 1. Path Fix for Modular Navigation
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_path = os.path.abspath(os.path.join(current_dir, ".."))
+if root_path not in sys.path:
+    sys.path.insert(0, root_path)
+
+from ui.engine_builder import build_engine
+from alignment_core.engine.world_factory import build_world
+from alignment_core.physics.braking_model import BrakingConstraint
 from alignment_core.constraints.load import LoadConstraint
 from alignment_core.constraints.friction import FrictionConstraint
 from alignment_core.constraints.stability import StabilityConstraint
 
-from alignment_core.state.agent import AgentState
-from alignment_core.state.environment import EnvironmentState
-from alignment_core.state.world_state import WorldState
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="SafeBot Audit", layout="wide")
 
-
-st.set_page_config(page_title="Safety Audit", layout="wide")
+# --- CUSTOM CSS FOR BENTO BOX AESTHETIC ---
+st.markdown("""
+    <style>
+    .main { background-color: #0E1117; }
+    .bento-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        margin-bottom: 25px;
+    }
+    .bento-card {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        padding: 20px;
+        border-radius: 12px;
+        text-align: center;
+    }
+    .status-pass { border-top: 5px solid #00CC96; }
+    .status-fail { border-top: 5px solid #FF4B4B; }
+    .metric-value { font-size: 24px; font-weight: bold; color: #58A6FF; }
+    </style>
+    """, unsafe_allow_html=True)
 
 st.title("🛡️ Robot Physics Safety Audit")
+st.caption("Deterministic Safety Alignment Engine v0.1.0")
 
-st.markdown("""
-This tool evaluates whether a robot's planned action violates **real-world physics constraints**.
+# --- SIDEBAR INPUTS ---
+with st.sidebar:
+    st.header("Mechanical Profile")
+    mass = st.number_input("Total Mass (kg)", 1.0, 5000.0, 1200.0)
+    wb = st.number_input("Wheelbase (m)", 0.5, 5.0, 1.2)
+    cog_h = st.number_input("CoG Height (m)", 0.1, 3.0, 0.6)
+    
+    st.header("Environment")
+    # AI Simulation Toggle
+    surface_mode = st.selectbox("Surface Detection", ["Manual", "AI Predicted"])
+    if surface_mode == "AI Predicted":
+        surface_type = st.selectbox("AI Detected Surface", ["dry_concrete", "wet_concrete", "ice"])
+        friction = 0.7 # Placeholder, overridden by AI map
+    else:
+        friction = st.slider("Manual Friction (mu)", 0.1, 1.2, 0.7)
+        surface_type = "default"
+        
+    slope = st.slider("Slope (°)", -20, 20, 0)
+    dist = st.number_input("Obstacle Dist (m)", 0.1, 50.0, 5.0)
+    
+    st.header("Current Action")
+    v = st.number_input("Velocity (m/s)", 0.0, 15.0, 3.0)
+    run_audit = st.button("🚀 EXECUTE AUDIT")
 
-It analyzes:
-
-• braking feasibility  
-• traction / friction  
-• load safety  
-• stability and tipping risk  
-
-The result is a **robot safety score and explanation**.
-""")
-
-st.divider()
-
-# -----------------------------
-# SIDEBAR INPUTS
-# -----------------------------
-
-st.sidebar.header("Robot Profile")
-
-robot_name = st.sidebar.text_input("Robot Name", "WarehouseBot")
-
-mass = st.sidebar.number_input("Robot Mass (kg)", 1.0, 10000.0, 1200.0)
-
-wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 5.0, 1.2)
-
-com_height = st.sidebar.number_input(
-    "Center of Mass Height (m)", 0.05, 3.0, 0.6
-)
-
-max_load = st.sidebar.number_input("Maximum Load (kg)", 0.0, 10000.0, 1500.0)
-
-max_speed = st.sidebar.number_input("Maximum Speed (m/s)", 0.1, 20.0, 4.0)
-
-
-st.sidebar.header("Environment")
-
-friction = st.sidebar.slider("Surface Friction", 0.1, 1.5, 0.7)
-
-slope = st.sidebar.slider("Slope Angle (degrees)", -30, 30, 0)
-
-distance = st.sidebar.number_input(
-    "Distance to Obstacle (m)", 0.1, 100.0, 5.0
-)
-
-st.sidebar.header("Robot Action")
-
-velocity = st.sidebar.number_input(
-    "Current Speed (m/s)", 0.0, max_speed, 2.0
-)
-
-deceleration = st.sidebar.number_input(
-    "Max Deceleration (m/s²)", 0.1, 20.0, 4.0
-)
-
-load_weight = st.sidebar.number_input(
-    "Load Weight (kg)", 0.0, max_load, 500.0
-)
-
-run = st.sidebar.button("Run Safety Audit")
-
-st.divider()
-
-# -----------------------------
-# BUILD WORLD STATE
-# -----------------------------
-
-
-def build_world_state():
-
-    agent = AgentState(
-        id="robot",
-        type="mobile",
-        mass=mass,
-        velocity=velocity,
-        max_speed=max_speed,
-        wheelbase=wheelbase,
-        center_of_mass_height=com_height,
-        load_weight=load_weight,
-        max_load=max_load,
+# --- AUDIT LOGIC ---
+if run_audit:
+    # Build state using the unified factory
+    world = build_world(
+        velocity=v, mass=mass, friction=friction, 
+        distance=dist, slope=slope, cog_h=cog_h, wheelbase=wb
     )
+    # Inject AI Surface if selected
+    world.environment.surface_type = surface_type
+    
+    engine = build_engine([
+        BrakingConstraint(), FrictionConstraint(), 
+        StabilityConstraint(), LoadConstraint()
+    ])
+    
+    report = engine.evaluate(world)
+    
+    # --- BENTO BOX RESULTS ---
+    st.markdown('<div class="bento-container">', unsafe_allow_html=True)
+    
+    for res in report.results:
+        status_class = "status-fail" if res.violated else "status-pass"
+        status_text = "DANGER" if res.violated else "SAFE"
+        
+        st.markdown(f"""
+            <div class="bento-card {status_class}">
+                <p style="color: #8B949E; margin-bottom: 5px;">{res.name.upper()}</p>
+                <div class="metric-value">{status_text}</div>
+                <p style="font-size: 12px; margin-top: 10px;">{res.message}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    environment = EnvironmentState(
-        friction=friction,
-        slope=slope,
-        obstacle_distance=distance,
-        temperature=20,
-    )
-
-    world = WorldState(
-        agent=agent,
-        environment=environment
-    )
-
-    return world
-
-
-# -----------------------------
-# SAFETY ENGINE
-# -----------------------------
-
-
-def run_audit():
-
-    world_state = build_world_state()
-
-    constraints = [
-        BrakingConstraint(),
-        LoadConstraint(),
-        FrictionConstraint(),
-        StabilityConstraint(),
-    ]
-
-    engine = SafetyEngine(constraints)
-
-    results = engine.evaluate(world_state)
-
-    return results
-
-
-# -----------------------------
-# SAFETY SCORE
-# -----------------------------
-
-
-def compute_safety_score(results):
-
-    if not results:
-        return 100
-
-    failures = 0
-
-    for r in results:
-        if not r.passed:
-            failures += 1
-
-    total = len(results)
-
-    score = max(0, int(100 - (failures / total) * 100))
-
-    return score
-
-
-# -----------------------------
-# HUMAN EXPLANATION
-# -----------------------------
-
-
-def explain_results(results):
-
-    messages = []
-
-    for r in results:
-
-        if r.passed:
-            continue
-
-        name = r.name.lower()
-
-        if "braking" in name:
-            messages.append(
-                "The robot cannot stop before reaching the obstacle."
-            )
-
-        elif "load" in name:
-            messages.append(
-                "The robot is carrying more load than its safe limit."
-            )
-
-        elif "friction" in name:
-            messages.append(
-                "Surface traction is too low for the current speed."
-            )
-
-        elif "stability" in name:
-            messages.append(
-                "The robot may tip over due to high center of mass or slope."
-            )
-
-        else:
-            messages.append(r.message)
-
-    return messages
-
-
-# -----------------------------
-# RESULTS
-# -----------------------------
-
-
-if run:
-
-    results = run_audit()
-
-    score = compute_safety_score(results)
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-
-        st.subheader("Safety Score")
-
-        fig = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=score,
-                title={"text": "Safety"},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "green"},
-                    "steps": [
-                        {"range": [0, 40], "color": "red"},
-                        {"range": [40, 70], "color": "orange"},
-                        {"range": [70, 100], "color": "lightgreen"},
-                    ],
-                },
-            )
-        )
-
+    # --- DETAILED ANALYSIS ---
+    col_gauge, col_table = st.columns([1, 2])
+    
+    with col_gauge:
+        score = report.safety_score
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number", value=score,
+            title={'text': "Total Safety Score"},
+            gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#58A6FF"}}
+        ))
         st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-
-        st.subheader("Physics Constraint Results")
-
-        table = []
-
-        for r in results:
-
-            table.append(
-                {
-                    "Constraint": r.name,
-                    "Passed": r.passed,
-                    "Message": r.message,
-                }
-            )
-
-        df = pd.DataFrame(table)
-
-        st.dataframe(df)
-
-    st.divider()
-
-    st.subheader("Human Explanation")
-
-    messages = explain_results(results)
-
-    if not messages:
-        st.success("The robot action appears physically safe.")
-    else:
-        for m in messages:
-            st.warning(m)
-
-    st.divider()
-
-    st.subheader("Scenario Analysis")
-
-    st.write(
-        "The system predicts whether the robot action is safe under current conditions."
-    )
-
-    if score < 50:
-        st.error("High risk scenario detected.")
-    elif score < 80:
-        st.warning("Moderate safety risk.")
-    else:
-        st.success("Robot action is likely safe.")
+        
+    with col_table:
+        st.subheader("Physics Telemetry")
+        df = pd.DataFrame([
+            {"Constraint": r.name, "Violation": r.violated, "Severity": r.severity}
+            for r in report.results
+        ])
+        st.table(df)

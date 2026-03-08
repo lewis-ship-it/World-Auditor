@@ -24,3 +24,12 @@ class SafetyReport:
             "risk_score": self.risk_score(),
             "results": [r.to_dict() for r in self.results],
         }
+    def generate_safety_certificate(results):
+        import uuid
+        from datetime import datetime
+        return {
+            "certificate_id": f"SAFE-{uuid.uuid4().hex[:8].upper()}",
+            "timestamp": datetime.now().isoformat(),
+            "status": "PASS" if all(not r.violated for r in results) else "FAIL",
+            "details": [r.to_dict() for r in results]
+        }
