@@ -5,7 +5,7 @@ plotly
 python-dotenv
 openai
 matplotlib
-opencv-python-headless
+opencv-contrib-python-headless
 numpy
 pillow
 scikit-learn
