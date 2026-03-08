@@ -9,3 +9,4 @@ opencv-python-headless
 numpy
 pillow
 nearest-neighbors
+scikit-learn
