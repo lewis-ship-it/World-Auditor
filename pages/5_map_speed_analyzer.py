@@ -2,8 +2,6 @@ import streamlit as st
 import numpy as np
 import cv2
 import plotly.graph_objects as go
-from PIL import Image
-
 from alignment_core.perception.track_extractor import extract_track_centerline
 from alignment_core.planning.racing_line import RacingLineOptimizer
 from alignment_core.physics.energy_model import EnergyModel
@@ -13,48 +11,89 @@ st.set_page_config(layout="wide")
 
 st.title("🏁 Ultimate Track Speed Analyzer")
 
-# -------------------------------
-# SIDEBAR VEHICLE SETTINGS
-# -------------------------------
+# ------------------------------------------------
+# SIDEBAR VEHICLE BUILDER
+# ------------------------------------------------
 
-st.sidebar.header("Vehicle")
+st.sidebar.header("Vehicle Builder")
 
-mass = st.sidebar.slider("Vehicle Mass (kg)", 200, 2000, 1200)
-friction = st.sidebar.slider("Surface Grip μ", 0.3, 1.5, 1.0)
-drag = st.sidebar.slider("Drag Coefficient", 0.2, 0.6, 0.32)
+mass = st.sidebar.slider("Mass (kg)",200,2000,1200)
+drag = st.sidebar.slider("Drag Coefficient",0.2,0.7,0.32)
+frontal_area = st.sidebar.slider("Frontal Area",1.2,3.0,2.2)
 
-battery_capacity = st.sidebar.slider("Battery Capacity (kWh)", 20, 120, 75)
+battery_capacity = st.sidebar.slider("Battery Capacity (kWh)",20,120,75)
 
-st.sidebar.header("AI Optimization")
+drive_type = st.sidebar.selectbox(
+"Drive Type",
+["FWD","RWD","AWD","4WD"]
+)
 
-optimize_line = st.sidebar.checkbox("Optimize Racing Line", True)
+# traction modifiers
+drive_mu_modifier = {
+"FWD":0.92,
+"RWD":0.96,
+"AWD":1.05,
+"4WD":1.08
+}
 
-# -------------------------------
-# MAP INPUT
-# -------------------------------
+friction = st.sidebar.slider("Surface Grip μ",0.3,1.5,1.0)
+
+friction *= drive_mu_modifier[drive_type]
+
+# ------------------------------------------------
+# TRACK SETTINGS
+# ------------------------------------------------
+
+st.sidebar.header("Track Settings")
+
+track_width = st.sidebar.slider("Track Width (m)",6,20,12)
+
+track_distance = st.sidebar.slider("Track Length Scale (m)",200,7000,1200)
+
+rotation = st.sidebar.slider("Rotate Track (deg)",-180,180,0)
+
+optimize_line = st.sidebar.checkbox("Optimize Racing Line",True)
+
+# ------------------------------------------------
+# FILE INPUT
+# ------------------------------------------------
 
 uploaded = st.file_uploader("Upload Track Map")
 
 if uploaded:
 
-    img = Image.open(uploaded).convert("RGB")
-    img_np = np.array(img)
+    img = cv2.imdecode(
+        np.frombuffer(uploaded.read(), np.uint8),
+        1
+    )
 
-    # -------------------------------
-    # TRACK EXTRACTION
-    # -------------------------------
+    img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
 
-    centerline = extract_track_centerline(img_np)
+    centerline = extract_track_centerline(img)
 
     if centerline is None:
+
         st.error("No track detected")
         st.stop()
 
     path = centerline.astype(float)
 
-    # -------------------------------
-    # AI RACING LINE
-    # -------------------------------
+    # ----------------------------
+    # ROTATION
+    # ----------------------------
+
+    theta = np.radians(rotation)
+
+    rot = np.array([
+        [np.cos(theta),-np.sin(theta)],
+        [np.sin(theta),np.cos(theta)]
+    ])
+
+    path = path @ rot
+
+    # ----------------------------
+    # RACING LINE
+    # ----------------------------
 
     if optimize_line:
 
@@ -65,238 +104,249 @@ if uploaded:
     xs = path[:,0]
     ys = path[:,1]
 
-    # -------------------------------
-    # CURVATURE
-    # -------------------------------
+    # ----------------------------
+    # SCALE TRACK
+    # ----------------------------
 
-    curvature = []
+    d = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
+
+    total = np.sum(d)
+
+    scale = track_distance / total
+
+    xs *= scale
+    ys *= scale
+
+    # ----------------------------
+    # CURVATURE
+    # ----------------------------
+
+    curvature=[]
 
     for i in range(1,len(xs)-1):
 
-        p1 = np.array([xs[i-1],ys[i-1]])
-        p2 = np.array([xs[i],ys[i]])
-        p3 = np.array([xs[i+1],ys[i+1]])
+        p1=np.array([xs[i-1],ys[i-1]])
+        p2=np.array([xs[i],ys[i]])
+        p3=np.array([xs[i+1],ys[i+1]])
 
-        k = np.linalg.norm(p3 - 2*p2 + p1)
+        k=np.linalg.norm(p3-2*p2+p1)
 
         curvature.append(k)
 
-    curvature = np.array([curvature[0]] + curvature + [curvature[-1]])
+    curvature=np.array([curvature[0]]+curvature+[curvature[-1]])
 
-    # -------------------------------
-    # SPEED LIMIT FROM PHYSICS
-    # -------------------------------
+    # ----------------------------
+    # SPEED PHYSICS
+    # ----------------------------
 
-    g = 9.81
+    g=9.81
 
-    max_speeds = np.sqrt((friction*g)/(curvature + 1e-4))
+    downforce = 0.5*1.225*frontal_area*drag*(curvature+1)
 
-    max_speeds = np.clip(max_speeds,0,120)
+    grip = friction*g + downforce/mass
 
-    # -------------------------------
-    # DISTANCE ALONG TRACK
-    # -------------------------------
+    max_speeds = np.sqrt(grip/(curvature+1e-4))
 
-    distances = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
-    distances = np.append(distances,distances[-1])
+    max_speeds=np.clip(max_speeds,0,120)
 
-    cumulative_distance = np.cumsum(distances)
+    # ----------------------------
+    # DISTANCES
+    # ----------------------------
 
-    # -------------------------------
-    # BRAKING MODEL
-    # -------------------------------
+    distances=np.sqrt(np.diff(xs)**2+np.diff(ys)**2)
+    distances=np.append(distances,distances[-1])
 
-    braking = BrakingModel(friction)
+    cumulative_distance=np.cumsum(distances)
 
-    braking_zones = []
+    # ----------------------------
+    # BRAKING
+    # ----------------------------
+
+    braking=BrakingModel(friction)
+
+    braking_zones=[]
 
     for i in range(len(max_speeds)-1):
 
-        v1 = max_speeds[i]
-        v2 = max_speeds[i+1]
-
-        if v2 < v1:
-
-            stop_dist = braking.braking_distance(v1)
+        if max_speeds[i+1] < max_speeds[i]:
 
             braking_zones.append(i)
 
-    # -------------------------------
-    # ENERGY MODEL
-    # -------------------------------
+    # ----------------------------
+    # ENERGY
+    # ----------------------------
 
-    energy_model = EnergyModel(
+    energy_model=EnergyModel(
         vehicle_mass=mass,
-        drag_coeff=drag
+        drag_coeff=drag,
+        frontal_area=frontal_area
     )
 
-    energy = energy_model.energy_used(max_speeds, distances)
+    energy=energy_model.energy_used(max_speeds,distances)
 
-    regen = energy_model.regen_energy(np.abs(np.diff(max_speeds)),0.6)
+    regen=energy_model.regen_energy(np.abs(np.diff(max_speeds)),0.6)
 
-    regen = np.append(regen,0)
+    regen=np.append(regen,0)
 
-    net_energy = energy - regen
+    net_energy=energy-regen
 
-    # -------------------------------
-    # BATTERY SOC
-    # -------------------------------
+    # ----------------------------
+    # BATTERY
+    # ----------------------------
 
-    battery_joules = battery_capacity * 3.6e6
+    battery_j=battery_capacity*3.6e6
 
-    soc = []
+    soc=[]
 
-    remaining = battery_joules
+    remaining=battery_j
 
     for e in net_energy:
 
-        remaining -= e
+        remaining-=e
 
-        soc.append(max(remaining / battery_joules * 100,0))
+        soc.append(max(remaining/battery_j*100,0))
 
-    soc = np.array(soc)
+    soc=np.array(soc)
 
-    # -------------------------------
-    # THERMAL MODELS
-    # -------------------------------
+    # ----------------------------
+    # THERMAL MODEL
+    # ----------------------------
 
-    tire_temp = []
-    brake_temp = []
+    tire_temp=[]
+    brake_temp=[]
 
-    tt = 60
-    bt = 120
+    tt=25
+    bt=40
 
     for v in max_speeds:
 
-        tt += v*0.25 - 0.04*tt
-        bt += v*0.45 - 0.08*bt
+        tt += 0.06*(v*4 - tt)
+        bt += 0.1*(v*6 - bt)
 
         tire_temp.append(tt)
         brake_temp.append(bt)
 
-    tire_temp = np.array(tire_temp)
-    brake_temp = np.array(brake_temp)
+    tire_temp=np.array(tire_temp)
+    brake_temp=np.array(brake_temp)
 
-    # -------------------------------
-    # MAIN MAP
-    # -------------------------------
+    # ----------------------------
+    # LATERAL G
+    # ----------------------------
+
+    lat_g = max_speeds**2 * curvature / g
+
+    # ------------------------------------------------
+    # MAP VISUALIZATION
+    # ------------------------------------------------
 
     col1,col2 = st.columns([2,1])
 
     with col1:
 
-        fig = go.Figure()
+        fig=go.Figure()
 
         fig.add_trace(go.Scatter(
             x=xs,
             y=ys,
             mode="lines",
-            line=dict(width=4,color="cyan"),
-            name="Racing Line"
+            line=dict(
+                width=6,
+                color=max_speeds,
+                colorscale="Turbo"
+            ),
+            hovertemplate=
+            "Speed %{marker.color:.1f} m/s"
         ))
 
         fig.add_trace(go.Scatter(
             x=xs[braking_zones],
             y=ys[braking_zones],
             mode="markers",
-            marker=dict(color="red",size=6),
-            name="Braking Zones"
+            marker=dict(color="red",size=7),
+            name="Braking"
         ))
 
         fig.update_layout(
-            images=[dict(
-                source=img,
-                xref="x",
-                yref="y",
-                x=0,
-                y=img_np.shape[0],
-                sizex=img_np.shape[1],
-                sizey=img_np.shape[0],
-                sizing="stretch",
-                opacity=0.5,
-                layer="below"
-            )],
             template="plotly_dark",
-            yaxis=dict(scaleanchor="x"),
-            margin=dict(l=0,r=0,t=0,b=0)
+            height=600,
+            title="Racing Line Speed Map",
+            yaxis=dict(scaleanchor="x")
         )
 
         st.plotly_chart(fig,use_container_width=True)
 
-    # -------------------------------
+    # ------------------------------------------------
     # METRICS
-    # -------------------------------
+    # ------------------------------------------------
 
     with col2:
 
-        lap_length = np.sum(distances)
+        lap_length=np.sum(distances)
 
-        lap_time = np.sum(distances / (max_speeds + 1e-4))
+        lap_time=np.sum(distances/(max_speeds+1e-4))
 
-        st.metric("Track Length", f"{lap_length:.1f} m")
+        st.metric("Track Length",f"{lap_length:.1f} m")
 
-        st.metric("Estimated Lap Time", f"{lap_time:.2f} s")
+        st.metric("Lap Time",f"{lap_time:.2f} s")
 
-        st.metric("Max Speed", f"{np.max(max_speeds):.1f} m/s")
+        st.metric("Max Speed",f"{np.max(max_speeds):.1f} m/s")
 
-        st.metric("Energy / Lap", f"{np.sum(net_energy)/1000:.2f} kJ")
+        st.metric("Energy/Lap",f"{np.sum(net_energy)/1000:.2f} kJ")
 
-    # -------------------------------
+    # ------------------------------------------------
     # TELEMETRY GRAPHS
-    # -------------------------------
+    # ------------------------------------------------
 
-    st.subheader("Speed Profile")
+    st.subheader("Speed & Lateral G")
 
-    fig_speed = go.Figure()
+    fig_speed=go.Figure()
 
     fig_speed.add_trace(go.Scatter(
         x=cumulative_distance,
         y=max_speeds,
-        mode="lines"
+        name="Speed"
+    ))
+
+    fig_speed.add_trace(go.Scatter(
+        x=cumulative_distance,
+        y=lat_g,
+        name="Lateral G"
     ))
 
     st.plotly_chart(fig_speed,use_container_width=True)
 
-    st.subheader("Brake Temperature")
+    st.subheader("Thermal Telemetry")
 
-    fig_bt = go.Figure()
+    fig_temp=go.Figure()
 
-    fig_bt.add_trace(go.Scatter(
+    fig_temp.add_trace(go.Scatter(
         x=cumulative_distance,
-        y=brake_temp
+        y=tire_temp,
+        name="Tire Temp"
     ))
 
-    st.plotly_chart(fig_bt,use_container_width=True)
-
-    st.subheader("Tire Temperature")
-
-    fig_tt = go.Figure()
-
-    fig_tt.add_trace(go.Scatter(
+    fig_temp.add_trace(go.Scatter(
         x=cumulative_distance,
-        y=tire_temp
+        y=brake_temp,
+        name="Brake Temp"
     ))
 
-    st.plotly_chart(fig_tt,use_container_width=True)
+    st.plotly_chart(fig_temp,use_container_width=True)
 
-    st.subheader("Energy Usage")
+    st.subheader("Energy + Battery")
 
-    fig_energy = go.Figure()
+    fig_energy=go.Figure()
 
     fig_energy.add_trace(go.Scatter(
         x=cumulative_distance,
-        y=net_energy
+        y=net_energy,
+        name="Energy"
+    ))
+
+    fig_energy.add_trace(go.Scatter(
+        x=cumulative_distance,
+        y=soc,
+        name="Battery SOC"
     ))
 
     st.plotly_chart(fig_energy,use_container_width=True)
-
-    st.subheader("Battery State of Charge")
-
-    fig_soc = go.Figure()
-
-    fig_soc.add_trace(go.Scatter(
-        x=cumulative_distance,
-        y=soc
-    ))
-
-    st.plotly_chart(fig_soc,use_container_width=True)
