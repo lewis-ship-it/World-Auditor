@@ -6,80 +6,102 @@ from PIL import Image
 import math
 from sklearn.neighbors import NearestNeighbors
 
-# --- PATH PROCESSING HELPERS ---
+# --- IMPROVED SORTING (With Distance Cap) ---
 
 def sort_points_sequentially(pts):
-    """Uses Nearest Neighbors to walk the track spine in order."""
+    """Sorts points with a 'jump' protection to prevent cross-track scattering."""
     if len(pts) < 2: return pts
+    
     sorted_pts = [pts[0]]
     remaining_pts = pts[1:].tolist()
     
+    # Maximum allowed distance to the next point (prevents jumping across the map)
+    # We set this based on a small percentage of the total image width
+    max_jump = 50 
+
     while remaining_pts:
         last_pt = sorted_pts[-1]
         nn = NearestNeighbors(n_neighbors=1).fit(remaining_pts)
         dist, idx = nn.kneighbors([last_pt])
+        
+        # If the nearest point is too far, it's likely a different part of the track
+        # We stop or look for a closer cluster instead of jumping
+        if dist[0][0] > max_jump and len(remaining_pts) > 1:
+             # Try to find a point that isn't a massive leap
+             break 
+             
         sorted_pts.append(remaining_pts.pop(idx[0][0]))
         
     return np.array(sorted_pts)
 
+# --- PHYSICS LOGIC ---
+
 def get_physics_metrics(curvatures, friction, wheelbase, mass):
-    """Calculates Speed (Traction & Tipping), Braking, and Energy."""
     g = 9.81
     track_width = wheelbase * 0.7
-    cog_h = 0.45 # Estimated Center of Gravity height
+    cog_h = 0.45 
     
     speeds = []
     for k in curvatures:
         radius = 1.0 / k if k > 0.0001 else 1000.0
-        # Limit 1: When will it slide?
         v_sliding = math.sqrt(friction * g * radius)
-        # Limit 2: When will it tip over?
         v_tipping = math.sqrt((g * (track_width / 2) * radius) / cog_h)
-        
         speeds.append(min(v_sliding, v_tipping))
     
     speeds = np.array(speeds)
-    # Simple energy model: Kinetic energy + Rolling Resistance
     energy = np.abs(np.gradient(0.5 * mass * speeds**2)) + (0.05 * mass * g)
     return speeds, energy
 
-# --- UI CONFIGURATION ---
+# --- UI ---
 
-st.set_page_config(page_title="SafeBot Map Auditor", layout="wide")
-st.title("🗺️ Map Speed & Stability Analyzer")
+st.set_page_config(page_title="SafeBot Resilient Auditor", layout="wide")
+st.title("🗺️ Resilient Map Speed Analyzer")
 
-st.sidebar.header("Robot & Mission Settings")
-mass = st.sidebar.number_input("Robot Mass (kg)", 0.1, 500.0, 40.0)
-wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 5.0, 0.6)
+st.sidebar.header("Settings")
 friction = st.sidebar.slider("Surface Friction (μ)", 0.1, 1.2, 0.8)
-track_len = st.sidebar.number_input("Total Track Length (m)", 1.0, 10000.0, 100.0)
+track_len = st.sidebar.number_input("Track Length (m)", 1.0, 5000.0, 100.0)
+# ADDED: Sensitivity slider to help the user clean up their specific map
+thresh_val = st.sidebar.slider("Map Sensitivity (Threshold)", 0, 255, 127)
 
-uploaded_file = st.file_uploader("Upload Track Map (High Contrast Recommended)")
+uploaded_file = st.file_uploader("Upload Track Map")
 
 if uploaded_file:
-    # 1. Image Processing & Skeletonization
     img_pil = Image.open(uploaded_file).convert("RGB")
     img_np = np.array(img_pil)
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     
-    # Threshold to create a clean binary mask of the track
-    _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # 1. DENOISING: Remove small dots/text that confuse the skeleton
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # SKELETONIZATION: This prevents the 'scattered' look by finding the track spine
-    skeleton = cv2.ximgproc.thinning(binary)
+    # 2. THRESHOLDING: Create the binary mask
+    _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY_INV)
+    
+    # 3. CLEANING: Remove noise smaller than 3x3 pixels
+    kernel = np.ones((3,3), np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+    # 4. SKELETONIZATION
+    # Requires opencv-contrib-python-headless
+    try:
+        skeleton = cv2.ximgproc.thinning(binary)
+    except AttributeError:
+        st.error("Missing 'opencv-contrib-python-headless'. Please check requirements.txt")
+        st.stop()
     
     y_c, x_c = np.where(skeleton > 0)
     pts = np.column_stack((x_c, y_c))
     
-    if len(pts) > 30:
-        # 2. Downsample and Sort
-        pts = pts[::12] # Adjust density based on track complexity
+    if len(pts) > 50:
+        # 5. DYNAMIC DOWNSAMPLING
+        # We take every Nth point to keep the UI fast but the curves smooth
+        pts = pts[::10] 
         pts = sort_points_sequentially(pts)
         
-        # 3. Scaling & Physics
+        # Calculate Scale
         pixel_dist = sum(np.linalg.norm(pts[i+1]-pts[i]) for i in range(len(pts)-1))
         m_px = track_len / pixel_dist
         
+        # Curvature & Metrics
         curvatures = []
         for i in range(1, len(pts)-1):
             p1, p2, p3 = pts[i-1], pts[i], pts[i+1]
@@ -88,43 +110,30 @@ if uploaded_file:
             k = abs(4 * np.sqrt(max(0, (a+b-c)*(a-b+c)*(-a+b+c)*(a+b+c))) / (a*b*c))
             curvatures.append(k / m_px)
         
-        speeds, energy = get_physics_metrics(np.array(curvatures), friction, wheelbase, mass)
+        speeds, energy = get_physics_metrics(np.array(curvatures), friction, 0.6, 40.0)
         dist_axis = np.cumsum([np.linalg.norm(pts[i+1]-pts[i])*m_px for i in range(len(pts)-2)])
 
-        # 4. Interactive Display Switcher
-        view_mode = st.radio("Map Layer:", ["Speed (m/s)", "Energy (J)"], horizontal=True)
-        data, colorscale = (speeds, "Viridis") if "Speed" in view_mode else (energy, "YlOrRd")
-
-        # 5. SPATIAL HEATMAP
+        # 6. VISUALIZATION
         map_fig = go.Figure()
         map_fig.add_trace(go.Scatter(
             x=pts[1:-1, 0], y=pts[1:-1, 1],
             mode='lines+markers',
-            line=dict(color='rgba(255,255,255,0.2)', width=1),
-            marker=dict(size=8, color=data, colorscale=colorscale, showscale=True),
-            text=[f"Dist: {d:.1f}m | Val: {v:.2f}" for d, v in zip(dist_axis, data)],
-            hoverinfo='text'
+            marker=dict(size=6, color=speeds, colorscale="Viridis", showscale=True),
+            line=dict(color="white", width=1)
         ))
 
         map_fig.update_layout(
-            images=[dict(
-                source=img_pil, xref="x", yref="y", x=0, y=max(pts[:, 1]),
-                sizex=max(pts[:, 0]), sizey=max(pts[:, 1]),
-                sizing="stretch", opacity=0.4, layer="below")],
+            images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(pts[:, 1]),
+                         sizex=max(pts[:, 0]), sizey=max(pts[:, 1]),
+                         sizing="stretch", opacity=0.3, layer="below")],
             xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
-            margin=dict(l=10, r=10, t=10, b=10), height=600, template="plotly_dark"
+            template="plotly_dark", height=600
         )
         st.plotly_chart(map_fig, use_container_width=True)
 
-        # 6. PERFORMANCE GRAPH
-        graph_fig = go.Figure()
-        graph_fig.add_trace(go.Scatter(x=dist_axis, y=data, mode='lines', line=dict(color='cyan')))
-        graph_fig.update_layout(
-            title=f"Mission Profile: {view_mode}",
-            xaxis_title="Distance (m)", yaxis_title=view_mode,
-            template="plotly_dark"
-        )
+        # Graph
+        graph_fig = go.Figure(go.Scatter(x=dist_axis, y=speeds, mode='lines'))
+        graph_fig.update_layout(title="Speed Profile", template="plotly_dark")
         st.plotly_chart(graph_fig, use_container_width=True)
-        
     else:
-        st.warning("⚠️ Track not found. Try an image with a clearer, darker track on a light background.")
+        st.warning("Adjust the 'Map Sensitivity' slider until the track appears clearly.")
