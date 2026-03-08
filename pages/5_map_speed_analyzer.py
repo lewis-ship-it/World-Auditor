@@ -3,50 +3,54 @@ import numpy as np
 import cv2
 import plotly.graph_objects as go
 from PIL import Image
-from sklearn.neighbors import NearestNeighbors
+import math
 
-# --- THE TRACING ENGINE ---
+# --- THE STABLE TRACER ---
 
-def trace_path_from_binary(binary_img):
-    """Traces the center of the white shape found in the binary image."""
-    # 1. Clean the binary image to ensure the track is solid
+def trace_center_line(binary_img):
+    """
+    Takes the 'Perfect AI View' and extracts the middle spine.
+    """
+    # 1. Clean up any tiny holes in your 'perfect' view
     kernel = np.ones((5,5), np.uint8)
     binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
     
-    # 2. Skeletonize to find the 'spine'
+    # 2. Skeletonize: This is the magic step. 
+    # It collapses the thick track into a 1-pixel wide line.
     skeleton = cv2.ximgproc.thinning(binary_img)
     
-    # 3. Get all spine points
-    y_indices, x_indices = np.where(skeleton > 0)
-    if len(x_indices) < 10: return None
-    points = np.column_stack((x_indices, y_indices))
-
-    # 4. Sequential Trace: Instead of random sorting, we walk the path
-    path = [points[0]]
-    unused_points = points[1:].tolist()
+    # 3. Find all points on that 1-pixel spine
+    y_idx, x_idx = np.where(skeleton > 0)
+    if len(x_idx) < 10: return None
     
-    while unused_points and len(path) < 1000:
-        last_pt = path[-1]
-        # Find points within a reasonable 'step' distance
-        nn = NearestNeighbors(n_neighbors=1).fit(unused_points)
-        dist, idx = nn.kneighbors([last_pt])
+    # 4. Walk the path (Sequential Ordering)
+    # We find a starting point and 'walk' to the next closest neighbor
+    pts = np.column_stack((x_idx, y_idx))
+    path = [pts[0]]
+    pts = pts[1:].tolist()
+    
+    while pts and len(path) < 1500:
+        last_p = path[-1]
+        # Find the index of the closest point
+        dists = [math.dist(last_p, p) for p in pts]
+        closest_idx = np.argmin(dists)
         
-        # If the next point is too far (>30px), we've reached the end of a segment
-        if dist[0][0] > 30:
+        # If the jump is too big (>40px), we stop to avoid 'nonsense' lines
+        if dists[closest_idx] > 40:
             break
             
-        path.append(unused_points.pop(idx[0][0]))
-        
+        path.append(pts.pop(closest_idx))
+    
     return np.array(path)
 
-# --- UI & LOGIC ---
+# --- APP UI ---
 
-st.set_page_config(page_title="AI Trace Auditor", layout="wide")
+st.set_page_config(page_title="AI Vision Tracer", layout="wide")
 st.title("🗺️ AI-View Path Tracer")
 
-st.sidebar.header("AI Vision Tuning")
-thresh_val = st.sidebar.slider("Sensitivity", 0, 255, 127)
-track_len = st.sidebar.number_input("Track Length (m)", 1.0, 5000.0, 100.0)
+# SIDEBAR
+thresh_val = st.sidebar.slider("AI Sensitivity", 0, 255, 127)
+downsample = st.sidebar.slider("Path Smoothness", 1, 20, 10)
 
 uploaded_file = st.file_uploader("Upload Track Map")
 
@@ -54,42 +58,41 @@ if uploaded_file:
     img_pil = Image.open(uploaded_file).convert("RGB")
     img_np = np.array(img_pil)
     
-    # Generate the "Perfect View"
+    # 1. GENERATE THE 'PERFECT' BINARY VIEW
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV)
+    _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    # Show the Binary View so you can tune it
-    st.subheader("AI Vision (The 'Perfect View')")
-    st.image(binary, width=400, caption="Tune sensitivity until the track is a solid white line.")
-
-    # TRACE THE MAP
-    pts = trace_path_from_binary(binary)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("1. AI Vision View")
+        st.image(binary, caption="The computer's clean view of the track", use_container_width=True)
     
-    if pts is not None:
-        xs, ys = pts[:, 0], pts[:, 1]
+    # 2. TRACE THE CENTER OF THAT VIEW
+    # We pass the binary image you said looks perfect
+    path_pts = trace_center_line(binary)
+    
+    if path_pts is not None:
+        # Downsample for smoother curves and faster graphs
+        final_pts = path_pts[::downsample]
+        xs, ys = final_pts[:, 0], final_pts[:, 1]
         
-        # Draw the Interactive Map
-        map_fig = go.Figure()
+        with col2:
+            st.subheader("2. Extracted Path")
+            fig = go.Figure()
+            # Draw the original image as background
+            fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines+markers', 
+                                   line=dict(color='cyan', width=3),
+                                   marker=dict(size=4, color='white')))
+            
+            fig.update_layout(
+                images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(ys),
+                             sizex=max(xs), sizey=max(ys),
+                             sizing="stretch", opacity=0.5, layer="below")],
+                xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
+                template="plotly_dark", margin=dict(l=0,r=0,t=0,b=0)
+            )
+            st.plotly_chart(fig, use_container_width=True)
         
-        # The Trace Line
-        map_fig.add_trace(go.Scatter(
-            x=xs, y=ys, mode='lines+markers',
-            line=dict(color='cyan', width=4),
-            marker=dict(size=4, color='white'),
-            name="AI Trace"
-        ))
-
-        map_fig.update_layout(
-            images=[dict(source=img_pil, xref="x", yref="y", x=0, y=max(ys),
-                         sizex=max(xs), sizey=max(ys),
-                         sizing="stretch", opacity=0.3, layer="below")],
-            xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x"),
-            template="plotly_dark", height=600,
-            margin=dict(l=0, r=0, t=0, b=0)
-        )
-        
-        st.subheader("Interactive Audit Map")
-        st.plotly_chart(map_fig, use_container_width=True)
-        st.success(f"✅ AI successfully traced {len(pts)} points along the track spine.")
+        st.success(f"✅ Successfully traced the center of the track ({len(final_pts)} nodes).")
     else:
-        st.error("Trace failed. Ensure the track is a continuous white line in the AI Vision view.")
+        st.error("AI could not find a continuous path. Adjust Sensitivity.")
