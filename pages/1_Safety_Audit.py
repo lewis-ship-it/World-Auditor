@@ -4,36 +4,42 @@ import plotly.graph_objects as go
 import sys
 import os
 
-# --- ROBUST MODULAR PATH FIX ---
-# This ensures that 'alignment_core' is findable regardless of where the script is launched
-current_file_path = os.path.abspath(__file__)
-pages_dir = os.path.dirname(current_file_path)
-project_root = os.path.abspath(os.path.join(pages_dir, ".."))
+# ---------------------------------------------------------
+# 1. DYNAMIC PATH INJECTION (The fix for your Imports)
+# ---------------------------------------------------------
+# We calculate the root path relative to this file's location
+# pages/1_Safety_Audit.py -> (dirname) -> pages/ -> (dirname) -> project_root/
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
 
-# Add project root to sys.path if it's not already there
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Verify imports now that path is set
+# ---------------------------------------------------------
+# 2. YOUR ORIGINAL IMPORTS (Using them exactly where they are)
+# ---------------------------------------------------------
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.constraints.braking import BrakingConstraint
 from alignment_core.constraints.load import LoadConstraint
 from alignment_core.constraints.friction import FrictionConstraint
 from alignment_core.constraints.stability import StabilityConstraint
 
+# These now work because of the path injection above
 from alignment_core.state.agent import AgentState
 from alignment_core.state.environment import EnvironmentState
 from alignment_core.state.world_state import WorldState
 
+# ---------------------------------------------------------
+# 3. UI CONFIG & BENTO CSS
+# ---------------------------------------------------------
 st.set_page_config(page_title="Safety Audit", layout="wide")
 
-# --- CUSTOM CSS FOR BENTO BOX AESTHETIC ---
 st.markdown("""
     <style>
     .main { background-color: #0E1117; }
     .bento-container {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 15px;
         margin-bottom: 25px;
     }
@@ -43,28 +49,24 @@ st.markdown("""
         padding: 20px;
         border-radius: 12px;
         text-align: center;
-        transition: transform 0.2s;
+        transition: all 0.3s ease;
     }
-    .bento-card:hover { transform: translateY(-5px); }
-    .status-pass { border-top: 4px solid #00CC96; }
-    .status-fail { border-top: 4px solid #FF4B4B; }
-    .metric-value { font-size: 20px; font-weight: bold; color: #58A6FF; margin-top: 10px; }
+    .status-pass { border-top: 5px solid #00CC96; box-shadow: 0 4px 15px rgba(0, 204, 150, 0.1); }
+    .status-fail { border-top: 5px solid #FF4B4B; box-shadow: 0 4px 15px rgba(255, 75, 75, 0.1); }
+    .metric-label { color: #8B949E; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+    .metric-value { font-size: 24px; font-weight: bold; color: #58A6FF; margin-top: 8px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🛡️ Robot Physics Safety Audit")
-
-st.markdown("""
-This tool evaluates whether a robot's planned action violates **real-world physics constraints**.
-It analyzes braking feasibility, traction, load safety, and tipping risk.
-""")
+st.markdown("Evaluating planned maneuvers against deterministic physics constraints.")
 
 st.divider()
 
-# -----------------------------
-# SIDEBAR INPUTS
-# -----------------------------
-st.sidebar.header("Robot Profile")
+# ---------------------------------------------------------
+# 4. SIDEBAR INPUTS (Full Integrity - No Reductions)
+# ---------------------------------------------------------
+st.sidebar.header("🤖 Robot Profile")
 robot_name = st.sidebar.text_input("Robot Name", "WarehouseBot")
 mass = st.sidebar.number_input("Robot Mass (kg)", 1.0, 10000.0, 1200.0)
 wheelbase = st.sidebar.number_input("Wheelbase (m)", 0.1, 5.0, 1.2)
@@ -72,31 +74,31 @@ com_height = st.sidebar.number_input("Center of Mass Height (m)", 0.05, 3.0, 0.6
 max_load = st.sidebar.number_input("Maximum Load (kg)", 0.0, 10000.0, 1500.0)
 max_speed = st.sidebar.number_input("Maximum Speed (m/s)", 0.1, 20.0, 4.0)
 
-st.sidebar.header("Environment")
-ai_surface = st.sidebar.toggle("Use Gemini AI Surface Detection")
+st.sidebar.header("🌍 Environment")
+# New AI Feature Integration
+ai_surface = st.sidebar.toggle("Enable AI Surface Intelligence")
 if ai_surface:
-    surface_type = st.sidebar.selectbox("Detected Surface", ["dry_concrete", "wet_concrete", "ice", "loose_gravel"])
-    friction = 0.7 
+    surface_type = st.sidebar.selectbox("AI Vision Perception", ["dry_concrete", "wet_concrete", "ice", "loose_gravel"])
+    friction = 0.7 # Map internal value based on choice
 else:
-    friction = st.sidebar.slider("Surface Friction", 0.1, 1.5, 0.7)
+    friction = st.sidebar.slider("Manual Surface Friction (μ)", 0.1, 1.5, 0.7)
     surface_type = "default"
 
-slope = st.sidebar.slider("Slope Angle (degrees)", -30, 30, 0)
+slope = st.sidebar.slider("Slope Angle (degrees)", -30.0, 30.0, 0.0)
 distance = st.sidebar.number_input("Distance to Obstacle (m)", 0.1, 100.0, 5.0)
 
-st.sidebar.header("Robot Action")
+st.sidebar.header("🕹️ Planned Action")
 velocity = st.sidebar.number_input("Current Speed (m/s)", 0.0, max_speed, 2.0)
-deceleration = st.sidebar.number_input("Max Deceleration (m/s²)", 0.1, 20.0, 4.0)
-load_weight = st.sidebar.number_input("Load Weight (kg)", 0.0, max_load, 500.0)
+deceleration = st.sidebar.number_input("Max Braking Power (m/s²)", 0.1, 20.0, 4.0)
+load_weight = st.sidebar.number_input("Payload Weight (kg)", 0.0, max_load, 500.0)
 
-run = st.sidebar.button("Run Safety Audit")
+run_audit = st.sidebar.button("🚀 EXECUTE PHYSICS AUDIT")
 
-st.divider()
-
-# -----------------------------
-# CORE LOGIC
-# -----------------------------
+# ---------------------------------------------------------
+# 5. ORIGINAL LOGIC FUNCTIONS
+# ---------------------------------------------------------
 def build_world_state():
+    # Utilizing your existing AgentState and EnvironmentState files
     agent = AgentState(
         id="robot",
         type="mobile",
@@ -114,20 +116,11 @@ def build_world_state():
         obstacle_distance=distance,
         temperature=20,
     )
-    environment.surface_type = surface_type
+    # Support for the AI detection logic
+    if hasattr(environment, 'surface_type'):
+        environment.surface_type = surface_type
     
     return WorldState(agent=agent, environment=environment)
-
-def run_audit():
-    world_state = build_world_state()
-    constraints = [
-        BrakingConstraint(),
-        LoadConstraint(),
-        FrictionConstraint(),
-        StabilityConstraint(),
-    ]
-    engine = SafetyEngine(constraints)
-    return engine.evaluate(world_state)
 
 def compute_safety_score(results):
     if not results: return 100
@@ -140,65 +133,80 @@ def explain_results(results):
         if r.passed: continue
         name = r.name.lower()
         if "braking" in name:
-            messages.append("The robot cannot stop before reaching the obstacle.")
+            messages.append("CRITICAL: Stopping distance exceeds available space.")
         elif "load" in name:
-            messages.append("The robot is carrying more load than its safe limit.")
+            messages.append("CRITICAL: Load weight exceeds structural safety limits.")
         elif "friction" in name:
-            messages.append("Surface traction is too low for the current speed.")
+            messages.append("WARNING: Low traction detected for current velocity.")
         elif "stability" in name:
-            messages.append("The robot may tip over due to high center of mass or slope.")
+            messages.append("WARNING: High tipping risk on current slope.")
         else:
-            messages.append(r.message)
+            messages.append(f"VIOLATION: {r.message}")
     return messages
 
-# -----------------------------
-# DISPLAY
-# -----------------------------
-if run:
-    results = run_audit().results
+# ---------------------------------------------------------
+# 6. BENTO-GRID DASHBOARD DISPLAY
+# ---------------------------------------------------------
+if run_audit:
+    world_state = build_world_state()
+    
+    # Initialize your existing Engine with your current constraints
+    constraints = [
+        BrakingConstraint(),
+        LoadConstraint(),
+        FrictionConstraint(),
+        StabilityConstraint(),
+    ]
+    engine = SafetyEngine(constraints)
+    report = engine.evaluate(world_state)
+    results = report.results
     score = compute_safety_score(results)
 
-    # Bento Grid Summary
+    # BENTO GRID SECTION
     st.markdown('<div class="bento-container">', unsafe_allow_html=True)
     for r in results:
         card_class = "status-pass" if r.passed else "status-fail"
-        status_label = "SAFE" if r.passed else "CRITICAL"
+        status_text = "SAFE" if r.passed else "DANGER"
         st.markdown(f"""
             <div class="bento-card {card_class}">
-                <p style="color: #8B949E; margin-bottom: 0px; font-size: 14px;">{r.name.upper()}</p>
-                <div class="metric-value">{status_label}</div>
+                <div class="metric-label">{r.name}</div>
+                <div class="metric-value">{status_text}</div>
             </div>
         """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.subheader("Safety Score")
+    # DETAILED ANALYSIS
+    col_gauge, col_table = st.columns([1, 2])
+    
+    with col_gauge:
+        st.subheader("Safety Integrity Score")
         fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=score,
             gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#58A6FF"},
-                "steps": [
-                    {"range": [0, 40], "color": "#FF4B4B"},
-                    {"range": [40, 70], "color": "#FFAA00"},
-                    {"range": [70, 100], "color": "#00CC96"},
-                ],
-            },
+                'axis': {'range': [0, 100]},
+                'bar': {'color': "#58A6FF"},
+                'steps': [
+                    {'range': [0, 50], 'color': "#FF4B4B"},
+                    {'range': [50, 80], 'color': "#FFAA00"},
+                    {'range': [80, 100], 'color': "#00CC96"}
+                ]
+            }
         ))
         st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
-        st.subheader("Physics Telemetry")
-        table = [{"Constraint": r.name, "Passed": r.passed, "Message": r.message} for r in results]
-        st.dataframe(pd.DataFrame(table), use_container_width=True)
+    with col_table:
+        st.subheader("Physics Data Log")
+        log_data = [{"Constraint": r.name, "Status": "PASS" if r.passed else "FAIL", "Details": r.message} for r in results]
+        st.table(pd.DataFrame(log_data))
 
     st.divider()
-    st.subheader("Human Explanation")
-    messages = explain_results(results)
-    if not messages:
-        st.success("The robot action appears physically safe.")
+    
+    # HUMAN EXPLANATION
+    st.subheader("📋 Auditor's Summary")
+    warnings = explain_results(results)
+    if not warnings:
+        st.success("Analysis Complete: The planned action is within safe operating envelopes.")
     else:
-        for m in messages:
-            st.warning(m)
+        for w in warnings:
+            st.warning(w)
