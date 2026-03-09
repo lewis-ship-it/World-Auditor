@@ -4,13 +4,17 @@ import plotly.graph_objects as go
 import sys
 import os
 
-# --- MODULAR PATH FIX ---
-# Ensures sub-pages can find the alignment_core and ui folders
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_path = os.path.abspath(os.path.join(current_dir, ".."))
-if root_path not in sys.path:
-    sys.path.insert(0, root_path)
+# --- ROBUST MODULAR PATH FIX ---
+# This ensures that 'alignment_core' is findable regardless of where the script is launched
+current_file_path = os.path.abspath(__file__)
+pages_dir = os.path.dirname(current_file_path)
+project_root = os.path.abspath(os.path.join(pages_dir, ".."))
 
+# Add project root to sys.path if it's not already there
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Verify imports now that path is set
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.constraints.braking import BrakingConstraint
 from alignment_core.constraints.load import LoadConstraint
@@ -21,7 +25,6 @@ from alignment_core.state.agent import AgentState
 from alignment_core.state.environment import EnvironmentState
 from alignment_core.state.world_state import WorldState
 
-# --- PAGE CONFIG ---
 st.set_page_config(page_title="Safety Audit", layout="wide")
 
 # --- CUSTOM CSS FOR BENTO BOX AESTHETIC ---
@@ -59,7 +62,7 @@ It analyzes braking feasibility, traction, load safety, and tipping risk.
 st.divider()
 
 # -----------------------------
-# SIDEBAR INPUTS (Full Integrity Maintained)
+# SIDEBAR INPUTS
 # -----------------------------
 st.sidebar.header("Robot Profile")
 robot_name = st.sidebar.text_input("Robot Name", "WarehouseBot")
@@ -70,11 +73,10 @@ max_load = st.sidebar.number_input("Maximum Load (kg)", 0.0, 10000.0, 1500.0)
 max_speed = st.sidebar.number_input("Maximum Speed (m/s)", 0.1, 20.0, 4.0)
 
 st.sidebar.header("Environment")
-# Added AI Toggle for Intelligence Module
 ai_surface = st.sidebar.toggle("Use Gemini AI Surface Detection")
 if ai_surface:
     surface_type = st.sidebar.selectbox("Detected Surface", ["dry_concrete", "wet_concrete", "ice", "loose_gravel"])
-    friction = 0.7 # Will be mapped in the FrictionConstraint
+    friction = 0.7 
 else:
     friction = st.sidebar.slider("Surface Friction", 0.1, 1.5, 0.7)
     surface_type = "default"
@@ -92,7 +94,7 @@ run = st.sidebar.button("Run Safety Audit")
 st.divider()
 
 # -----------------------------
-# CORE LOGIC (Full Original Logic)
+# CORE LOGIC
 # -----------------------------
 def build_world_state():
     agent = AgentState(
@@ -112,7 +114,6 @@ def build_world_state():
         obstacle_distance=distance,
         temperature=20,
     )
-    # Inject AI Surface Type if active
     environment.surface_type = surface_type
     
     return WorldState(agent=agent, environment=environment)
@@ -151,13 +152,13 @@ def explain_results(results):
     return messages
 
 # -----------------------------
-# BENTO DISPLAY
+# DISPLAY
 # -----------------------------
 if run:
-    results = run_audit()
+    results = run_audit().results
     score = compute_safety_score(results)
 
-    # NEW: Bento Grid Summary Cards
+    # Bento Grid Summary
     st.markdown('<div class="bento-container">', unsafe_allow_html=True)
     for r in results:
         card_class = "status-pass" if r.passed else "status-fail"
@@ -201,10 +202,3 @@ if run:
     else:
         for m in messages:
             st.warning(m)
-
-    if score < 50:
-        st.error("High risk scenario detected.")
-    elif score < 80:
-        st.warning("Moderate safety risk.")
-    else:
-        st.success("Robot action is likely safe.")
