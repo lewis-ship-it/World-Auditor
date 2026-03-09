@@ -8,9 +8,16 @@ from alignment_core.constraints.stability import StabilityConstraint
 
 def build_engine():
 
-    return SafetyEngine([
+    constraints = [
+
         BrakingConstraint(),
+
         FrictionConstraint(),
-        LoadConstraint(),
-        StabilityConstraint()
-    ])
+
+        StabilityConstraint(),
+
+        LoadConstraint()
+
+    ]
+
+    return SafetyEngine(constraints)

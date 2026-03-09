@@ -1,28 +1,26 @@
-import math
 from .base import Constraint, ConstraintResult
 
 
-class FrictionConstraint(Constraint):
+class BrakingConstraint(Constraint):
 
-    name = "Surface Traction"
+    name = "Braking Feasibility"
     severity = "hard"
 
     def evaluate(self, world_state):
 
         v = world_state.agent.velocity
+        dist = world_state.environment.distance_to_obstacles
         mu = world_state.environment.surface_friction
         g = world_state.environment.gravity
-        dist = world_state.environment.distance_to_obstacles
 
-        if dist <= 0:
-            required_mu = 1.0
+        if mu == 0:
+            stop_dist = float("inf")
         else:
-            required_accel = (v ** 2) / (2 * dist)
-            required_mu = required_accel / g
+            stop_dist = (v ** 2) / (2 * mu * g)
 
-        violated = required_mu > mu
+        violated = stop_dist > dist
 
-        msg = f"Required μ={required_mu:.2f} | Available μ={mu:.2f}"
+        msg = f"StopDist={stop_dist:.2f}m | Available={dist:.2f}m"
 
         return ConstraintResult(
             self.name,

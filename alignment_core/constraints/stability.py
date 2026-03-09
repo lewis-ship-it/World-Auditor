@@ -1,38 +1,31 @@
-from .base import Constraint, ConstraintResult
 import math
+from .base import Constraint, ConstraintResult
+
 
 class StabilityConstraint(Constraint):
-    name = "TippingRisk"
+
+    name = "Tipping Risk"
     severity = "hard"
 
     def evaluate(self, world_state):
-        results = []
-        # FIX: Explicitly loop through the agents list
-        for agent in world_state.agents:
-            env = world_state.environment
-            slope = env.slope
-            
-            # Now 'agent' is an AgentState object, so this attribute exists
-            center_height = agent.center_of_mass_height
-            wheelbase = agent.wheelbase
 
-            # Tipping physics: The angle where gravity pulls the CoM outside the wheelbase
-            # 
-            if center_height > 0:
-                tipping_angle = math.degrees(math.atan((wheelbase / 2) / center_height))
-            else:
-                tipping_angle = 90.0
+        slope = world_state.environment.slope
 
-            violated = slope > tipping_angle
+        h = world_state.agent.center_of_mass_height
+        wb = world_state.agent.wheelbase
 
-            results.append(ConstraintResult(
-                self.name,
-                violated,
-                self.severity,
-                {
-                    "agent_id": agent.id,
-                    "slope": slope,
-                    "tipping_threshold": tipping_angle,
-                }
-            ))
-        return results
+        if h == 0:
+            tipping_angle = 90
+        else:
+            tipping_angle = math.degrees(math.atan((wb / 2) / h))
+
+        violated = slope > tipping_angle
+
+        msg = f"Slope={slope:.1f}° | Limit={tipping_angle:.1f}°"
+
+        return ConstraintResult(
+            self.name,
+            violated,
+            self.severity,
+            msg
+        )

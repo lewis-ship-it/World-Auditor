@@ -7,5 +7,4 @@ from .environment import EnvironmentState
 class WorldState:
 
     agent: AgentState
-
     environment: EnvironmentState

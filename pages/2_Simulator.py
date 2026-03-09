@@ -1,63 +1,34 @@
 import streamlit as st
-
 from core.robot_profiles import ROBOT_PROFILES, SURFACE_MAP, BRAKE_MAP
-from core.physics_engine import stopping_distance, safety_margin
+from alignment_core.physics.braking_model import BrakingModel
 from visual.graphs import stopping_graph
 
 
 st.title("Robot Physics Simulator")
 
-profile_name = st.selectbox(
+robot = st.selectbox("Robot",list(ROBOT_PROFILES.keys()))
 
-    "Robot",
-    list(ROBOT_PROFILES.keys())
-
-)
-
-profile = ROBOT_PROFILES[profile_name]
-
-velocity = st.slider("Velocity (m/s)",0.0,20.0,5.0)
-
+velocity = st.slider("Velocity",0.0,20.0,5.0)
 distance = st.slider("Obstacle Distance",1.0,30.0,10.0)
 
-surface = st.selectbox(
-
-    "Surface",
-    list(SURFACE_MAP.keys())
-
-)
-
+surface = st.selectbox("Surface",list(SURFACE_MAP.keys()))
 friction = SURFACE_MAP[surface]
 
-brake = st.select_slider(
+brake_condition = st.selectbox("Brake Condition",list(BRAKE_MAP.keys()))
 
-    "Brake Condition",
-    options=list(BRAKE_MAP.keys())
+decel = BRAKE_MAP[brake_condition]
 
-)
+model = BrakingModel(friction)
 
-decel = BRAKE_MAP[brake]
+stop_dist = model.braking_distance(velocity)
 
-stop_dist = stopping_distance(
-
-    velocity,
-    decel,
-    friction
-
-)
-
-margin = safety_margin(
-
-    distance,
-    stop_dist
-
-)
+margin = distance - stop_dist
 
 if margin > 0:
     st.success("SAFE")
 else:
     st.error("COLLISION RISK")
 
-fig = stopping_graph(stop_dist, margin)
+fig = stopping_graph(stop_dist,margin)
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig,use_container_width=True)

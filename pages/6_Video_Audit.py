@@ -1,28 +1,26 @@
 import streamlit as st
-import cv2
 import tempfile
+
+from alignment_core.vision.physics_video_analyzer import PhysicsVideoAnalyzer
 
 st.title("Video Robot Audit")
 
 file = st.file_uploader(
-
     "Upload robot video",
     type=["mp4","mov","avi"]
-
 )
 
 if file:
 
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(file.read())
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.write(file.read())
 
-    cap = cv2.VideoCapture(tfile.name)
+    analyzer = PhysicsVideoAnalyzer()
 
-    ret, frame = cap.read()
+    velocities = analyzer.estimate_motion(tmp.name)
 
-    if ret:
-        st.image(frame, channels="BGR")
+    st.subheader("Estimated Velocities")
 
-    cap.release()
+    st.line_chart(velocities)
 
-    st.info("Object tracking module will analyze robot motion.")
+    st.write(f"Peak speed estimate: {max(velocities):.2f}")
