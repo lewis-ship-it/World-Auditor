@@ -25,9 +25,10 @@ from alignment_core.constraints.friction import FrictionConstraint
 from alignment_core.constraints.stability import StabilityConstraint
 
 # These now work because of the path injection above
-from alignment_core.state.agent import AgentState
-from alignment_core.state.environment import EnvironmentState
-from alignment_core.state.world_state import WorldState
+# Change your imports to this:
+from alignment_core.world_model.agent import AgentState
+from alignment_core.world_model.environment import EnvironmentState
+from alignment_core.world_model.world_state import WorldState
 
 # ---------------------------------------------------------
 # 3. UI CONFIG & BENTO CSS
