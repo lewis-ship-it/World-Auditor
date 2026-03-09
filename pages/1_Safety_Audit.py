@@ -36,7 +36,7 @@ class AgentState:
 class EnvironmentState:
     friction: float
     slope: float
-    obstacle_distance: float
+    distance_to_obstacles: float
     temperature: float
     surface_type: str = "default"
 
@@ -139,9 +139,9 @@ def build_world_state():
         max_load=max_load,
     )
     environment = EnvironmentState(
-        friction=friction,
+        surface_friction=friction,
         slope=slope,
-        obstacle_distance=distance,
+        distance_to_obstacles=distance,
         temperature=20,
         surface_type=surface_type
     )
