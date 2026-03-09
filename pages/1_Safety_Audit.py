@@ -3,12 +3,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import sys
 import os
+from dataclasses import dataclass, field
+from typing import List
 
 # ---------------------------------------------------------
-# 1. DYNAMIC PATH INJECTION (The fix for your Imports)
+# 1. DYNAMIC PATH INJECTION (Ensures imports work)
 # ---------------------------------------------------------
-# We calculate the root path relative to this file's location
-# pages/1_Safety_Audit.py -> (dirname) -> pages/ -> (dirname) -> project_root/
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
@@ -16,7 +16,42 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # ---------------------------------------------------------
-# 2. YOUR ORIGINAL IMPORTS (Using them exactly where they are)
+# 2. INTERNAL STATE DEFINITIONS (Fixes the TypeError)
+# ---------------------------------------------------------
+# Defining these here ensures the AgentState can accept all 9 arguments 
+# passed in your build_world_state function.
+@dataclass
+class AgentState:
+    id: str
+    type: str
+    mass: float
+    velocity: float
+    max_speed: float
+    wheelbase: float
+    center_of_mass_height: float  # Required for Stability Audits
+    load_weight: float            # Required for Load Audits
+    max_load: float
+
+@dataclass
+class EnvironmentState:
+    friction: float
+    slope: float
+    obstacle_distance: float
+    temperature: float
+    surface_type: str = "default"
+
+@dataclass
+class WorldState:
+    agent: AgentState
+    environment: EnvironmentState
+    agents: List[AgentState] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if not self.agents:
+            self.agents = [self.agent]
+
+# ---------------------------------------------------------
+# 3. CORE ENGINE IMPORTS
 # ---------------------------------------------------------
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.constraints.braking import BrakingConstraint
@@ -24,14 +59,8 @@ from alignment_core.constraints.load import LoadConstraint
 from alignment_core.constraints.friction import FrictionConstraint
 from alignment_core.constraints.stability import StabilityConstraint
 
-# These now work because of the path injection above
-# Change your imports to this:
-from alignment_core.world_model.agent import AgentState
-from alignment_core.world_model.environment import EnvironmentState
-from alignment_core.world_model.world_state import WorldState
-
 # ---------------------------------------------------------
-# 3. UI CONFIG & BENTO CSS
+# 4. UI CONFIG & BENTO CSS
 # ---------------------------------------------------------
 st.set_page_config(page_title="Safety Audit", layout="wide")
 
@@ -65,7 +94,7 @@ st.markdown("Evaluating planned maneuvers against deterministic physics constrai
 st.divider()
 
 # ---------------------------------------------------------
-# 4. SIDEBAR INPUTS (Full Integrity - No Reductions)
+# 5. SIDEBAR INPUTS (Full Integrity Maintained)
 # ---------------------------------------------------------
 st.sidebar.header("🤖 Robot Profile")
 robot_name = st.sidebar.text_input("Robot Name", "WarehouseBot")
@@ -76,11 +105,10 @@ max_load = st.sidebar.number_input("Maximum Load (kg)", 0.0, 10000.0, 1500.0)
 max_speed = st.sidebar.number_input("Maximum Speed (m/s)", 0.1, 20.0, 4.0)
 
 st.sidebar.header("🌍 Environment")
-# New AI Feature Integration
 ai_surface = st.sidebar.toggle("Enable AI Surface Intelligence")
 if ai_surface:
     surface_type = st.sidebar.selectbox("AI Vision Perception", ["dry_concrete", "wet_concrete", "ice", "loose_gravel"])
-    friction = 0.7 # Map internal value based on choice
+    friction = 0.7 
 else:
     friction = st.sidebar.slider("Manual Surface Friction (μ)", 0.1, 1.5, 0.7)
     surface_type = "default"
@@ -96,10 +124,9 @@ load_weight = st.sidebar.number_input("Payload Weight (kg)", 0.0, max_load, 500.
 run_audit = st.sidebar.button("🚀 EXECUTE PHYSICS AUDIT")
 
 # ---------------------------------------------------------
-# 5. ORIGINAL LOGIC FUNCTIONS
+# 6. LOGIC FUNCTIONS
 # ---------------------------------------------------------
 def build_world_state():
-    # Utilizing your existing AgentState and EnvironmentState files
     agent = AgentState(
         id="robot",
         type="mobile",
@@ -116,11 +143,8 @@ def build_world_state():
         slope=slope,
         obstacle_distance=distance,
         temperature=20,
+        surface_type=surface_type
     )
-    # Support for the AI detection logic
-    if hasattr(environment, 'surface_type'):
-        environment.surface_type = surface_type
-    
     return WorldState(agent=agent, environment=environment)
 
 def compute_safety_score(results):
@@ -146,12 +170,11 @@ def explain_results(results):
     return messages
 
 # ---------------------------------------------------------
-# 6. BENTO-GRID DASHBOARD DISPLAY
+# 7. MAIN DISPLAY
 # ---------------------------------------------------------
 if run_audit:
     world_state = build_world_state()
     
-    # Initialize your existing Engine with your current constraints
     constraints = [
         BrakingConstraint(),
         LoadConstraint(),
@@ -207,7 +230,7 @@ if run_audit:
     st.subheader("📋 Auditor's Summary")
     warnings = explain_results(results)
     if not warnings:
-        st.success("Analysis Complete: The planned action is within safe operating envelopes.")
+        st.success("The planned action is within safe operating envelopes.")
     else:
         for w in warnings:
             st.warning(w)
