@@ -1,4 +1,14 @@
 from ..world_model.primitives import Vector3
+def get_dynamic_forces(mass, accel, com_h, wheelbase):
+    """Calculates weight shift during braking."""
+    g = 9.81
+    static_load = (mass * g) / 2
+    transfer = (mass * abs(accel) * com_h) / wheelbase
+    
+    front_load = static_load + transfer
+    rear_load = static_load - transfer
+    
+    return max(0, front_load), max(0, rear_load)
 def calculate_dynamic_normal_forces(mass, acceleration, com_height, wheelbase):
     """
     Calculates how weight shifts from rear to front during braking/acceleration.

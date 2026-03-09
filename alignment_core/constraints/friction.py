@@ -1,6 +1,5 @@
-import math
 from .base import Constraint, ConstraintResult
-
+from .base import Constraint, ConstraintResult
 
 class FrictionConstraint(Constraint):
 
