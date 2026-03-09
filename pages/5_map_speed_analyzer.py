@@ -5,7 +5,9 @@ import plotly.graph_objects as go
 from alignment_core.perception.track_extractor import extract_track_centerline
 from alignment_core.planning.racing_line import RacingLineOptimizer
 from alignment_core.physics.energy_model import EnergyModel
-from scipy.signal import savgol_filter # Added for path smoothing
+from alignment_core.physics.braking_model import BrakingModel
+from scipy.signal import savgol_filter
+import math
 
 st.set_page_config(layout="wide")
 
@@ -16,6 +18,7 @@ st.title("🏁 Ultimate Track Speed Analyzer")
 # ------------------------------------------------
 st.sidebar.header("Vehicle Builder")
 
+# Using number_input for unrestricted values
 mass = st.sidebar.number_input("Mass (kg)", value=1470.0) 
 drag = st.sidebar.number_input("Drag Coefficient", value=0.35)
 frontal_area = st.sidebar.number_input("Frontal Area", value=2.1)
@@ -37,16 +40,17 @@ rotation = st.sidebar.number_input("Rotate Track (deg)", value=0.0)
 optimize_line = st.sidebar.checkbox("Optimize Racing Line", True)
 
 # ------------------------------------------------
-# FILE INPUT & SEPARATE PREVIEWS
+# FILE INPUT & SEPARATE PREVIEWS (RESTORED)
 # ------------------------------------------------
 uploaded = st.file_uploader("Upload Track Map")
 
 if uploaded:
+    # Read Image
     file_bytes = np.frombuffer(uploaded.read(), np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # UI: Restoration of the Dual Preview
+    # UI: Restoration of the Dual Preview (Side-by-Side)
     prev_col1, prev_col2 = st.columns(2)
     with prev_col1:
         st.subheader("Original Upload")
@@ -80,141 +84,121 @@ if uploaded:
     xs, ys = path[:, 0], path[:, 1]
 
     # ----------------------------
-    # SCALE & SMOOTHING (Surgical Physics Fixes)
+    # SCALE & PATH SMOOTHING
     # ----------------------------
     d_raw = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
     scale = track_distance / np.sum(d_raw)
     xs *= scale
     ys *= scale
 
-    # Smooth the track to remove 'pixel jitters' that cause 150-min laps
+    # Savgol smoothing to remove pixel jitter (The 150-min lap fix)
     if len(xs) > 15:
         xs = savgol_filter(xs, 15, 3)
-        ys = savgol_filter(ys, window_length=15, polyorder=3)
+        ys = savgol_filter(ys, 15, 3)
 
     # ----------------------------
-    # CURVATURE & SPEED PHYSICS
+    # CURVATURE (MENGER METHOD)
     # ----------------------------
-    # ----------------------------
-# CURVATURE & SPEED PHYSICS (DYNAMIC FIX)
-# ----------------------------
-curvature = []
-# We use a 5-point window for smoother, more realistic curvature
-window = 5 
-for i in range(window, len(xs) - window):
-    p_prev = np.array([xs[i - window], ys[i - window]])
-    p_curr = np.array([xs[i], ys[i]])
-    p_next = np.array([xs[i + window], ys[i + window]])
+    curvature = []
+    window = 3 
+    for i in range(window, len(xs) - window):
+        p1 = np.array([xs[i - window], ys[i - window]])
+        p2 = np.array([xs[i], ys[i]])
+        p3 = np.array([xs[i + window], ys[i + window]])
+        # 3-Point Curvature formula
+        area = 0.5 * abs(p1[0]*(p2[1]-p3[1]) + p2[0]*(p3[1]-p1[1]) + p3[0]*(p1[1]-p2[1]))
+        d1, d2, d3 = np.linalg.norm(p2-p1), np.linalg.norm(p3-p2), np.linalg.norm(p3-p1)
+        k = (4 * area) / (d1 * d2 * d3 + 1e-6)
+        curvature.append(k)
     
-    # Menger Curvature formula
-    area = 0.5 * abs(p_prev[0]*(p_curr[1]-p_next[1]) + p_curr[0]*(p_next[1]-p_prev[1]) + p_next[0]*(p_prev[1]-p_curr[1]))
-    d1 = np.linalg.norm(p_curr - p_prev)
-    d2 = np.linalg.norm(p_next - p_curr)
-    d3 = np.linalg.norm(p_next - p_prev)
-    
-    k = (4 * area) / (d1 * d2 * d3 + 1e-6)
-    curvature.append(k)
+    # Pad ends
+    curvature = np.array([curvature[0]]*window + curvature + [curvature[-1]]*window)
 
-# Pad the ends to match array length
-curvature = np.array([curvature[0]]*window + curvature + [curvature[-1]]*window)
+    # ----------------------------
+    # THREE-PASS SPEED SOLVER (FIXED DYNAMIC SPEED)
+    # ----------------------------
+    g = 9.81
+    # 1. Lateral Pass (Grip Limit)
+    downforce = 0.5 * 1.225 * frontal_area * drag * (curvature + 1)
+    grip_limit = friction * g + (downforce / mass)
+    max_speeds = np.sqrt(grip_limit / (curvature + 1e-6))
+    max_speeds = np.clip(max_speeds, 10.0, 95.0) 
 
-# Physics: Calculate Grip-Limited Speed
-g = 9.81
-grip_limit = friction * g
-# V = sqrt(µg / k)
-max_speeds = np.sqrt(grip_limit / (curvature + 1e-4))
+    # Distances for passes
+    distances = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
+    distances = np.append(distances, distances[-1])
 
-# ----------------------------
-# LONGITUDINAL SMOOTHING (Prevents "Teleporting" Speed)
-# ----------------------------
-# LONGITUDINAL SMOOTHING (Prevents "Teleporting" Speed)
-# ----------------------------
-# This simulates the car actually having to accelerate between corners
+    # 2. Forward Pass (Acceleration)
+    a_max = 5.0 # m/s^2
+    for i in range(1, len(max_speeds)):
+        v_reach = np.sqrt(max_speeds[i-1]**2 + 2 * a_max * distances[i-1])
+        max_speeds[i] = min(max_speeds[i], v_reach)
 
-# Calculate distances before using them
-distances = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
-distances = np.append(distances, distances[-1])
-cumulative_distance = np.cumsum(distances)
+    # 3. Backward Pass (Braking)
+    b_max = 8.0 # m/s^2
+    for i in range(len(max_speeds)-2, -1, -1):
+        v_need = np.sqrt(max_speeds[i+1]**2 + 2 * b_max * distances[i])
+        max_speeds[i] = min(max_speeds[i], v_need)
 
-final_speeds = np.zeros_like(max_speeds)
-final_speeds[0] = 10.0 # Start at 10 m/s
-max_accel = 5.0 # m/s^2 (Standard performance car)
+    # ----------------------------
+    # TELEMETRY & THERMAL
+    # ----------------------------
+    cumulative_distance = np.cumsum(distances)
+    energy_model = EnergyModel(vehicle_mass=mass, drag_coeff=drag, frontal_area=frontal_area)
+    energy = energy_model.energy_used(max_speeds, distances)
+    net_energy = energy - np.append(energy_model.regen_energy(np.abs(np.diff(max_speeds)), 0.6), 0)
 
-for i in range(1, len(max_speeds)):
-    dist = distances[i-1]
-    # Calculate how much speed we COULD gain in this distance
-    possible_speed = np.sqrt(final_speeds[i-1]**2 + 2 * max_accel * dist)
-    # Target is the lower of (Physics Limit) or (Acceleration Ability)
-    final_speeds[i] = min(max_speeds[i], possible_speed)
+    battery_j = battery_capacity * 3.6e6
+    soc = np.clip(100 - (np.cumsum(net_energy) / battery_j * 100), 0, 100)
 
-# Replace max_speeds with our simulated profile
-max_speeds = np.clip(final_speeds, 10.0, 95.0)
+    tire_temp, brake_temp = [], []
+    tt, bt = 25.0, 30.0 # Start at ambient
+    for v in max_speeds:
+        tt += 0.08 * (v * 0.4) - 0.02 * (tt - 25)
+        bt += 0.12 * (v * 0.7) - 0.03 * (bt - 30)
+        tire_temp.append(tt)
+        brake_temp.append(bt)
 
-# Downforce and grip limit calculation
-g = 9.81
-downforce = 0.5 * 1.225 * frontal_area * drag * (curvature + 1)
-grip_limit = friction * g + (downforce / mass)
+    lat_g = (max_speeds**2 * curvature) / g
 
-# Calculate speed with a 15 m/s floor to keep the sim moving
-max_speeds = np.sqrt(grip_limit / (curvature + 1e-6))
-max_speeds = np.clip(max_speeds, 15.0, 95.0) 
+    # ------------------------------------------------
+    # MAIN VISUALIZATION (FIXED PLOTLY TRACE)
+    # ------------------------------------------------
+    st.divider()
+    col1, col2 = st.columns([2, 1])
 
-# ----------------------------
-# TELEMETRY & THERMAL
-# ----------------------------
-energy_model = EnergyModel(vehicle_mass=mass, drag_coeff=drag, frontal_area=frontal_area)
-energy = energy_model.energy_used(max_speeds, distances)
-net_energy = energy - (np.append(energy_model.regen_energy(np.abs(np.diff(max_speeds)), 0.6), 0))
+    with col1:
+        fig = go.Figure()
+        # Marker dictionary handles the color array for the heatmap
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="lines+markers",
+            line=dict(width=2, color="rgba(255,255,255,0.3)"),
+            marker=dict(size=4, color=max_speeds, colorscale="Turbo", showscale=True, colorbar=dict(title="m/s")),
+            hovertemplate="Speed %{marker.color:.1f} m/s"
+        ))
+        fig.update_layout(template="plotly_dark", height=600, yaxis=dict(scaleanchor="x"))
+        st.plotly_chart(fig, use_container_width=True)
 
-battery_j = battery_capacity * 3.6e6
-soc = np.clip(100 - (np.cumsum(net_energy) / battery_j * 100), 0, 100)
+    with col2:
+        lap_time_s = np.sum(distances / (max_speeds + 1e-4))
+        st.metric("Lap Time", f"{int(lap_time_s//60)}m {lap_time_s%60:.2f}s")
+        st.metric("Avg Speed", f"{np.mean(max_speeds)*3.6:.1f} km/h")
+        st.metric("Max Speed", f"{np.max(max_speeds)*3.6:.1f} km/h")
+        st.metric("Energy Used", f"{np.sum(net_energy)/1000:.2f} kJ")
 
-tire_temp, brake_temp = [], []
-tt, bt = 25.0, 30.0 
-for v in max_speeds:
-    tt += 0.08 * (v * 0.4) - 0.02 * (tt - 25)
-    bt += 0.12 * (v * 0.7) - 0.03 * (bt - 30)
-    tire_temp.append(tt)
-    brake_temp.append(bt)
+    # ------------------------------------------------
+    # TELEMETRY GRAPHS
+    # ------------------------------------------------
+    st.subheader("Dynamic Speed Profile")
+    f_speed = go.Figure()
+    f_speed.add_trace(go.Scatter(x=cumulative_distance, y=max_speeds*3.6, name="Speed (km/h)"))
+    f_speed.add_trace(go.Scatter(x=cumulative_distance, y=lat_g, name="Lateral G", yaxis="y2"))
+    f_speed.update_layout(template="plotly_dark", yaxis2=dict(overlaying="y", side="right", title="G-Force"))
+    st.plotly_chart(f_speed, use_container_width=True)
 
-lat_g = (max_speeds**2 * curvature) / g
-
-# ------------------------------------------------
-# MAIN ANALYZER MAP (FIXED PLOTLY TRACE)
-# ------------------------------------------------
-st.divider()
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=xs, y=ys, mode="lines+markers",
-        line=dict(width=2, color="rgba(255,255,255,0.3)"),
-        marker=dict(
-            size=4, 
-            color=max_speeds, 
-            colorscale="Turbo", 
-            showscale=True,
-            colorbar=dict(title="m/s")
-        ),
-        hovertemplate="Speed %{marker.color:.1f} m/s"
-    ))
-    fig.update_layout(template="plotly_dark", height=600, yaxis=dict(scaleanchor="x"))
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    lap_time_s = np.sum(distances / (max_speeds + 1e-4))
-    st.metric("Lap Time", f"{int(lap_time_s//60)}m {lap_time_s%60:.2f}s")
-    st.metric("Avg Speed", f"{np.mean(max_speeds)*3.6:.1f} km/h")
-    st.metric("Max Speed", f"{np.max(max_speeds)*3.6:.1f} km/h")
-    st.metric("Energy Used", f"{np.sum(net_energy)/1000:.2f} kJ")
-
-# ------------------------------------------------
-# TELEMETRY GRAPHS
-# ------------------------------------------------
-st.subheader("Telemetry Profile")
-f_speed = go.Figure()
-f_speed.add_trace(go.Scatter(x=cumulative_distance, y=max_speeds*3.6, name="Speed (km/h)"))
-f_speed.add_trace(go.Scatter(x=cumulative_distance, y=lat_g, name="Lateral G", yaxis="y2"))
-f_speed.update_layout(template="plotly_dark", yaxis2=dict(overlaying="y", side="right", title="G-Force"))
-st.plotly_chart(f_speed, use_container_width=True)
+    st.subheader("Thermal & Energy Profile")
+    f_therm = go.Figure()
+    f_therm.add_trace(go.Scatter(x=cumulative_distance, y=tire_temp, name="Tire Temp (°C)"))
+    f_therm.add_trace(go.Scatter(x=cumulative_distance, y=soc, name="Battery %", yaxis="y2"))
+    f_therm.update_layout(template="plotly_dark", yaxis2=dict(overlaying="y", side="right", range=[0, 100]))
+    st.plotly_chart(f_therm, use_container_width=True)
