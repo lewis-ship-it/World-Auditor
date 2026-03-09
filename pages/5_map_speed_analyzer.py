@@ -9,7 +9,7 @@ from scipy.signal import savgol_filter
 
 st.set_page_config(layout="wide", page_title="World-Auditor | Physics Lab")
 
-st.title("🏁 Ultimate Track Speed Analyzer (Length-Fixed)")
+st.title("🏁 Ultimate Track Speed Analyzer (Fixed Alignment)")
 
 # ------------------------------------------------
 # SIDEBAR VEHICLE BUILDER
@@ -29,10 +29,10 @@ if uploaded_file:
     image = cv2.imdecode(file_bytes, 1)
     
     with st.spinner("Analyzing track geometry..."):
+        # 1. Extraction
         raw_points = extract_track_centerline(image)
-        
         if raw_points is None or len(raw_points) < 10:
-            st.error("Track too short or not detected. Use a clearer image.")
+            st.error("Track path too complex or not found.")
             st.stop()
 
         points = raw_points
@@ -42,86 +42,84 @@ if uploaded_file:
                 optimized = optimizer.optimize()
                 if optimized is not None: points = np.array(optimized)
             except:
-                st.warning("Optimizer failed. Using raw path.")
+                st.warning("Racing line optimization failed. Using centerline.")
 
-    # 1. Coordinate Smoothing
+    # 2. Geometry Smoothing (Fixes "Jagged" Curvature)
     points = np.array(points)
     xs, ys = points[:, 0], points[:, 1]
     
-    window = min(len(xs) // 5, 15)
-    if window % 2 == 0: window += 1
+    # Dynamic window for Savitzky-Golay filter
+    win = min(len(xs) // 7, 21)
+    if win % 2 == 0: win += 1
+    if win < 5: win = 5
     
-    xs_smooth = savgol_filter(xs, window, 3)
-    ys_smooth = savgol_filter(ys, window, 3)
+    xs_s = savgol_filter(xs, win, 3)
+    ys_s = savgol_filter(ys, win, 3)
 
-    # 2. Distance and Curvature
-    # We calculate step-by-step distances (length = N-1)
-    dx_steps = np.diff(xs_smooth)
-    dy_steps = np.diff(ys_smooth)
-    ds_pixels = np.sqrt(dx_steps**2 + dy_steps**2)
-    
-    total_px = np.sum(ds_pixels)
-    scale = track_distance / (total_px + 1e-6)
-    ds_meters = ds_pixels * scale
-    cum_dist = np.insert(np.cumsum(ds_meters), 0, 0.0)
-
-    # Curvature (Length = N)
-    dx = np.gradient(xs_smooth)
-    dy = np.gradient(ys_smooth)
+    # 3. Physics Calculations (N-Length)
+    dx = np.gradient(xs_s)
+    dy = np.gradient(ys_s)
     ddx = np.gradient(dx)
     ddy = np.gradient(dy)
+    
+    # Curvature (k)
     curvature = np.abs(dx * ddy - dy * ddx) / ((dx**2 + dy**2)**1.5 + 1e-6)
+    
+    # Distance scaling
+    ds_px = np.sqrt(np.diff(xs_s)**2 + np.diff(ys_s)**2)
+    total_px = np.sum(ds_px)
+    scale = track_distance / (total_px + 1e-6)
+    ds_m = ds_px * scale
+    cum_dist = np.insert(np.cumsum(ds_m), 0, 0)
 
-    # 3. Physics Solver (N-Length)
+    # 4. Three-Pass Solver
     g = 9.81
-    a_max = friction * g * 0.7
-    b_max = friction * g * 0.9
+    a_max = friction * g * 0.7 
+    b_max = friction * g * 0.9 
     
-    # Pass 1: Lateral Limit
-    v_target = np.sqrt((friction * g) / (curvature + 1e-6))
-    v_target = np.clip(v_target, 2.0, 92.0)
+    # Pass 1: Max Cornering Speed
+    v_limit = np.sqrt((friction * g) / (curvature + 1e-6))
+    v_limit = np.clip(v_limit, 1.0, 92.0)
 
-    # Pass 2: Forward
-    v_phys = np.zeros_like(v_target)
-    for i in range(1, len(v_phys)):
-        dist = ds_meters[i-1]
-        v_phys[i] = min(v_target[i], np.sqrt(v_phys[i-1]**2 + 2 * a_max * dist))
+    # Pass 2: Forward (Accel)
+    v_final = np.zeros_like(v_limit)
+    for i in range(1, len(v_final)):
+        v_final[i] = min(v_limit[i], np.sqrt(v_final[i-1]**2 + 2 * a_max * ds_m[i-1]))
 
-    # Pass 3: Backward
-    for i in range(len(v_phys)-2, -1, -1):
-        dist = ds_meters[i]
-        v_phys[i] = min(v_phys[i], np.sqrt(v_phys[i+1]**2 + 2 * b_max * dist))
+    # Pass 3: Backward (Braking)
+    for i in range(len(v_final)-2, -1, -1):
+        v_final[i] = min(v_final[i], np.sqrt(v_final[i+1]**2 + 2 * b_max * ds_m[i]))
 
-    # 4. Final Alignment Check
-    v_kmh = v_phys * 3.6
-    
-    # CRITICAL FIX: Ensure v_kmh is exactly the same length as xs_smooth
-    if len(v_kmh) != len(xs_smooth):
-        v_kmh = np.interp(np.linspace(0, 1, len(xs_smooth)), np.linspace(0, 1, len(v_kmh)), v_kmh)
+    v_kmh = v_final * 3.6
 
     # ------------------------------------------------
-    # UI DISPLAY
+    # MANDATORY ALIGNMENT FIX FOR PLOTLY
     # ------------------------------------------------
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Lap Time", f"{np.sum(ds_meters / np.maximum(v_phys[1:], 0.5)):.2f}s")
-        # Map with heat-mapped speed
+    # This ensures x, y, and color arrays are EXACTLY the same length
+    if len(v_kmh) != len(xs_s):
+        v_kmh = np.interp(np.arange(len(xs_s)), np.arange(len(v_kmh)), v_kmh)
+
+    # ------------------------------------------------
+    # DASHBOARD
+    # ------------------------------------------------
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Avg Speed", f"{np.mean(v_kmh):.1f} km/h")
         fig_map = go.Figure(data=go.Scatter(
-            x=xs_smooth, y=ys_smooth,
+            x=xs_s, y=ys_s,
             mode='lines',
             line=dict(
-                color=v_kmh, # Now guaranteed to match coordinate length
+                color=v_kmh, # Length now guaranteed to match
                 colorscale='Turbo',
                 width=6,
                 colorbar=dict(title="km/h")
             )
         ))
-        fig_map.update_layout(template="plotly_dark", title="Spatial Velocity Map")
+        fig_map.update_layout(template="plotly_dark", title="Spatial Speed Heatmap", margin=dict(l=0,r=0,b=0,t=40))
         st.plotly_chart(fig_map, use_container_width=True)
 
-    with col2:
-        st.metric("Max Lateral G", f"{np.max((v_phys**2 * curvature)/g):.2f} G")
-        fig_prof = go.Figure(data=go.Scatter(x=cum_dist, y=v_kmh, name="Speed", fill='tozeroy'))
-        fig_prof.update_layout(template="plotly_dark", title="Velocity Profile", xaxis_title="Distance (m)", yaxis_title="km/h")
+    with c2:
+        st.metric("Lap Time", f"{np.sum(ds_m / np.maximum(v_final[1:], 1.0)):.2f}s")
+        fig_prof = go.Figure(data=go.Scatter(x=cum_dist, y=v_kmh, fill='tozeroy', line=dict(color='#00d4ff')))
+        fig_prof.update_layout(template="plotly_dark", title="Velocity over Distance", xaxis_title="Meters", yaxis_title="km/h")
         st.plotly_chart(fig_prof, use_container_width=True)
