@@ -34,7 +34,7 @@ class AgentState:
 
 @dataclass
 class EnvironmentState:
-    friction: float
+    surface_friction: float
     slope: float
     distance_to_obstacles: float
     temperature: float
