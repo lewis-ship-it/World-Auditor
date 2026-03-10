@@ -1,19 +1,15 @@
-from dataclasses import dataclass
-
-
-@dataclass
 class ConstraintResult:
-    """
-    Standard output for every constraint in the physics safety engine.
-    """
 
-    name: str
-    passed: bool
-    message: str = ""
-
-    def to_dict(self):
-        return {
-            "Constraint": self.name,
-            "Status": "PASS" if self.passed else "FAIL",
-            "Details": self.message
-        }
+    def __init__(
+        self,
+        name,
+        passed,
+        message="",
+        severity="info",
+        score_impact=0
+    ):
+        self.name = name
+        self.passed = passed
+        self.message = message
+        self.severity = severity
+        self.score_impact = score_impact

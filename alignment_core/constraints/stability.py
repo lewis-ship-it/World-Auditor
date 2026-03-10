@@ -1,31 +1,26 @@
+from alignment_core.constraints.constraint_result import ConstraintResult
 import math
-from .base import Constraint, ConstraintResult
 
 
-class StabilityConstraint(Constraint):
-
-    name = "Tipping Risk"
-    severity = "hard"
+class StabilityConstraint:
 
     def evaluate(self, world_state):
 
-        slope = world_state.environment.slope
+        slope = abs(world_state.environment.slope)
+        com = world_state.agent.center_of_mass_height
+        wheelbase = world_state.agent.wheelbase
 
-        h = world_state.agent.center_of_mass_height
-        wb = world_state.agent.wheelbase
+        tipping_angle = math.degrees(math.atan(wheelbase / (2 * com)))
 
-        if h == 0:
-            tipping_angle = 90
-        else:
-            tipping_angle = math.degrees(math.atan((wb / 2) / h))
-
-        violated = slope > tipping_angle
-
-        msg = f"Slope={slope:.1f}° | Limit={tipping_angle:.1f}°"
+        if slope < tipping_angle:
+            return ConstraintResult(
+                name="Stability Constraint",
+                passed=True,
+                message="Robot stable on current slope."
+            )
 
         return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            msg
+            name="Stability Constraint",
+            passed=False,
+            message="Slope exceeds tipping stability threshold."
         )

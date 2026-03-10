@@ -1,10 +1,6 @@
-from dataclasses import dataclass
-from .agent import AgentState
-from .environment import EnvironmentState
-
-
-@dataclass
 class WorldState:
 
-    agent: AgentState
-    environment: EnvironmentState
+    def __init__(self, agent, environment, action=None):
+        self.agent = agent
+        self.environment = environment
+        self.action = action

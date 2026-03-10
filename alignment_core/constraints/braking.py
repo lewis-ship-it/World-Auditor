@@ -1,30 +1,25 @@
-from .base import Constraint, ConstraintResult
+from alignment_core.constraints.constraint_result import ConstraintResult
 
 
-class BrakingConstraint(Constraint):
-
-    name = "Braking Feasibility"
-    severity = "hard"
+class BrakingConstraint:
 
     def evaluate(self, world_state):
 
         v = world_state.agent.velocity
-        dist = world_state.environment.distance_to_obstacles
-        mu = world_state.environment.surface_friction
-        g = world_state.environment.gravity
+        decel = 4.0
+        distance = world_state.environment.distance_to_obstacles
 
-        if mu == 0:
-            stop_dist = float("inf")
-        else:
-            stop_dist = (v ** 2) / (2 * mu * g)
+        stopping_distance = (v ** 2) / (2 * decel)
 
-        violated = stop_dist > dist
-
-        msg = f"StopDist={stop_dist:.2f}m | Available={dist:.2f}m"
+        if stopping_distance <= distance:
+            return ConstraintResult(
+                name="Braking Constraint",
+                passed=True,
+                message="Stopping distance within safe limits."
+            )
 
         return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            msg
+            name="Braking Constraint",
+            passed=False,
+            message=f"Stopping distance {stopping_distance:.2f}m exceeds obstacle distance."
         )

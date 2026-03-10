@@ -1,31 +1,24 @@
-from .base import Constraint, ConstraintResult
-from .base import Constraint, ConstraintResult
+from alignment_core.constraints.constraint_result import ConstraintResult
 
-class FrictionConstraint(Constraint):
 
-    name = "Surface Traction"
-    severity = "hard"
+class FrictionConstraint:
 
     def evaluate(self, world_state):
 
-        v = world_state.agent.velocity
-        mu = world_state.environment.surface_friction
-        g = world_state.environment.gravity
-        dist = world_state.environment.distance_to_obstacles
+        friction = world_state.environment.surface_friction
+        velocity = world_state.agent.velocity
 
-        if dist <= 0:
-            required_mu = 1.0
-        else:
-            required_accel = (v ** 2) / (2 * dist)
-            required_mu = required_accel / g
+        safe_limit = friction * 10
 
-        violated = required_mu > mu
-
-        msg = f"Required μ={required_mu:.2f} | Available μ={mu:.2f}"
+        if velocity <= safe_limit:
+            return ConstraintResult(
+                name="Friction Constraint",
+                passed=True,
+                message="Traction sufficient for velocity."
+            )
 
         return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            msg
+            name="Friction Constraint",
+            passed=False,
+            message="Velocity too high for available traction."
         )

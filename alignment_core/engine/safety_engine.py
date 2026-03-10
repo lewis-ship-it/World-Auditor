@@ -1,26 +1,26 @@
+from alignment_core.engine.constraint_engine import ConstraintEngine
+from alignment_core.engine.risk_engine import RiskEngine
+
+
 class SafetyReport:
 
-    def __init__(self, results):
+    def __init__(self, results, score):
+
         self.results = results
-
-    def passed(self):
-        return all(r.passed for r in self.results)
-
-    def failed(self):
-        return [r for r in self.results if not r.passed]
+        self.score = score
 
 
 class SafetyEngine:
 
     def __init__(self, constraints):
-        self.constraints = constraints
+
+        self.constraint_engine = ConstraintEngine(constraints)
+        self.risk_engine = RiskEngine()
 
     def evaluate(self, world_state):
 
-        results = []
+        results = self.constraint_engine.evaluate(world_state)
 
-        for constraint in self.constraints:
-            result = constraint.evaluate(world_state)
-            results.append(result)
+        score = self.risk_engine.compute_score(results)
 
-        return SafetyReport(results)
+        return SafetyReport(results, score)

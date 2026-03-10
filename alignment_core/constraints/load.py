@@ -1,25 +1,22 @@
-from .base import Constraint, ConstraintResult
+from alignment_core.constraints.constraint_result import ConstraintResult
 
 
-class LoadConstraint(Constraint):
-
-    name = "Load Stability"
-    severity = "soft"
+class LoadConstraint:
 
     def evaluate(self, world_state):
 
         load = world_state.agent.load_weight
-        mass = world_state.agent.mass
+        max_load = world_state.agent.max_load
 
-        ratio = load / mass if mass > 0 else 0
-
-        violated = ratio > 0.5
-
-        msg = f"Load ratio {ratio:.2f}"
+        if load <= max_load:
+            return ConstraintResult(
+                name="Load Constraint",
+                passed=True,
+                message="Load within structural limits."
+            )
 
         return ConstraintResult(
-            self.name,
-            violated,
-            self.severity,
-            msg
+            name="Load Constraint",
+            passed=False,
+            message="Payload exceeds maximum load capacity."
         )
