@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import sys
 import os
-from dataclasses import dataclass, field
 from typing import List
 
 # ---------------------------------------------------------
@@ -16,43 +15,12 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # ---------------------------------------------------------
-# 2. INTERNAL STATE DEFINITIONS (Fixed for Default Argument Rule)
+# 2. CORE STATE & ENGINE IMPORTS (Replaced Local Classes)
 # ---------------------------------------------------------
-@dataclass
-class AgentState:
-    id: str
-    type: str
-    mass: float
-    velocity: float
-    max_speed: float
-    wheelbase: float
-    center_of_mass_height: float
-    load_weight: float
-    max_load: float
+from alignment_core.world_model.agent import AgentState
+from alignment_core.world_model.environment import EnvironmentState
+from alignment_core.world_model.world_state import WorldState
 
-@dataclass
-class EnvironmentState:
-    # All fields now have defaults to prevent the TypeError
-    gravity: float = 9.81
-    surface_friction: float = 0.7
-    slope: float = 0.0
-    distance_to_obstacles: float = 10.0
-    temperature: float = 20.0
-    surface_type: str = "default"
-
-@dataclass
-class WorldState:
-    agent: AgentState
-    environment: EnvironmentState
-    agents: List[AgentState] = field(default_factory=list)
-    
-    def __post_init__(self):
-        if not self.agents:
-            self.agents = [self.agent]
-
-# ---------------------------------------------------------
-# 3. CORE ENGINE IMPORTS
-# ---------------------------------------------------------
 from alignment_core.engine.safety_engine import SafetyEngine
 from alignment_core.constraints.braking import BrakingConstraint
 from alignment_core.constraints.load import LoadConstraint
@@ -138,13 +106,12 @@ def build_world_state():
         load_weight=load_weight,
         max_load=max_load,
     )
+    # Using the structure from your environment.py
     environment = EnvironmentState(
         gravity=9.81,
         surface_friction=friction,
         slope=slope,
-        distance_to_obstacles=distance,
-        temperature=20.0,
-        surface_type=surface_type
+        distance_to_obstacles=distance
     )
     return WorldState(agent=agent, environment=environment)
 
