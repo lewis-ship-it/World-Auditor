@@ -18,8 +18,6 @@ if project_root not in sys.path:
 # ---------------------------------------------------------
 # 2. INTERNAL STATE DEFINITIONS (Fixes the TypeError)
 # ---------------------------------------------------------
-# Defining these here ensures the AgentState can accept all 9 arguments 
-# passed in your build_world_state function.
 @dataclass
 class AgentState:
     id: str
@@ -34,6 +32,7 @@ class AgentState:
 
 @dataclass
 class EnvironmentState:
+    gravity: float = 9.81         # ADDED: Required by braking.py
     surface_friction: float
     slope: float
     distance_to_obstacles: float
@@ -139,6 +138,7 @@ def build_world_state():
         max_load=max_load,
     )
     environment = EnvironmentState(
+        gravity=9.81,                     # ADDED: Matches class field
         surface_friction=friction,
         slope=slope,
         distance_to_obstacles=distance,
