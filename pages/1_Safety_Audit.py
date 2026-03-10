@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 # ---------------------------------------------------------
-# 1. DYNAMIC PATH INJECTION (Ensures imports work)
+# 1. DYNAMIC PATH INJECTION
 # ---------------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
@@ -16,7 +16,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # ---------------------------------------------------------
-# 2. INTERNAL STATE DEFINITIONS (Fixes the TypeError)
+# 2. INTERNAL STATE DEFINITIONS (Fixed for Default Argument Rule)
 # ---------------------------------------------------------
 @dataclass
 class AgentState:
@@ -26,17 +26,18 @@ class AgentState:
     velocity: float
     max_speed: float
     wheelbase: float
-    center_of_mass_height: float  # Required for Stability Audits
-    load_weight: float            # Required for Load Audits
+    center_of_mass_height: float
+    load_weight: float
     max_load: float
 
 @dataclass
 class EnvironmentState:
-    gravity: float = 9.81         # ADDED: Required by braking.py
-    surface_friction: float
-    slope: float
-    distance_to_obstacles: float
-    temperature: float
+    # All fields now have defaults to prevent the TypeError
+    gravity: float = 9.81
+    surface_friction: float = 0.7
+    slope: float = 0.0
+    distance_to_obstacles: float = 10.0
+    temperature: float = 20.0
     surface_type: str = "default"
 
 @dataclass
@@ -93,7 +94,7 @@ st.markdown("Evaluating planned maneuvers against deterministic physics constrai
 st.divider()
 
 # ---------------------------------------------------------
-# 5. SIDEBAR INPUTS (Full Integrity Maintained)
+# 5. SIDEBAR INPUTS
 # ---------------------------------------------------------
 st.sidebar.header("🤖 Robot Profile")
 robot_name = st.sidebar.text_input("Robot Name", "WarehouseBot")
@@ -138,11 +139,11 @@ def build_world_state():
         max_load=max_load,
     )
     environment = EnvironmentState(
-        gravity=9.81,                     # ADDED: Matches class field
+        gravity=9.81,
         surface_friction=friction,
         slope=slope,
         distance_to_obstacles=distance,
-        temperature=20,
+        temperature=20.0,
         surface_type=surface_type
     )
     return WorldState(agent=agent, environment=environment)
@@ -186,7 +187,6 @@ if run_audit:
     results = report.results
     score = compute_safety_score(results)
 
-    # BENTO GRID SECTION
     st.markdown('<div class="bento-container">', unsafe_allow_html=True)
     for r in results:
         card_class = "status-pass" if r.passed else "status-fail"
@@ -199,7 +199,6 @@ if run_audit:
         """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # DETAILED ANALYSIS
     col_gauge, col_table = st.columns([1, 2])
     
     with col_gauge:
@@ -225,8 +224,6 @@ if run_audit:
         st.table(pd.DataFrame(log_data))
 
     st.divider()
-    
-    # HUMAN EXPLANATION
     st.subheader("📋 Auditor's Summary")
     warnings = explain_results(results)
     if not warnings:
