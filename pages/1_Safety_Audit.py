@@ -106,7 +106,7 @@ def build_world_state():
         load_weight=load_weight,
         max_load=max_load,
     )
-    # Using the structure from your environment.py
+    # FIX: Using explicit keyword arguments to match environment.py
     environment = EnvironmentState(
         gravity=9.81,
         surface_friction=friction,
