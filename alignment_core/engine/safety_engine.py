@@ -1,8 +1,4 @@
 class SafetyReport:
-    """
-    Standardized container for safety evaluation results.
-    Keeps the engine output consistent for UI and other modules.
-    """
 
     def __init__(self, results):
         self.results = results
@@ -23,8 +19,8 @@ class SafetyEngine:
 
         results = []
 
-        for c in self.constraints:
-            result = c.evaluate(world_state)
+        for constraint in self.constraints:
+            result = constraint.evaluate(world_state)
             results.append(result)
 
         return SafetyReport(results)
