@@ -1,248 +1,335 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 from streamlit_drawable_canvas import st_canvas
-import sys
-import os
+import heapq
 
-# --- PATH SETUP ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+st.set_page_config(layout="wide", page_title="World Auditor Lab")
 
 # ---------------------------------------------------------
-# 1. SHARED PHYSICS CONFIGURATIONS
+# PHYSICS CONSTANTS
 # ---------------------------------------------------------
+
+g = 9.81
+
 SURFACE_PHYSICS = {
-    "Concrete (Grey)": {"color": "#808080", "mu": 0.9},
-    "Tarmac (Black)": {"color": "#000000", "mu": 1.0},
-    "Grass (Green)": {"color": "#228B22", "mu": 0.3},
-    "Ice (Blue)": {"color": "#ADD8E6", "mu": 0.05},
-    "Mud (Brown)": {"color": "#8B4513", "mu": 0.2},
-    "Sand (Light Brown)": {"color": "#D2B48C", "mu": 0.4}
-}
-
-TIRE_PROFILES = {
-    "Slick": {"base_mod": 1.1, "wet_penalty": 0.6},
-    "All-Terrain": {"base_mod": 0.9, "wet_penalty": 0.1},
-    "Studded Ice": {"base_mod": 0.8, "wet_penalty": 0.1}
+    "Tarmac": {"color": "#000000", "mu": 1.0},
+    "Concrete": {"color": "#808080", "mu": 0.9},
+    "Grass": {"color": "#228B22", "mu": 0.35},
+    "Mud": {"color": "#8B4513", "mu": 0.2},
+    "Ice": {"color": "#ADD8E6", "mu": 0.05}
 }
 
 # ---------------------------------------------------------
-# 2. CORE ENGINES
+# ROBOT PHYSICS
 # ---------------------------------------------------------
 
-def get_safe_velocity(dist, elevation, friction_map, width_map, mass, max_speed, robot_width):
-    slopes = np.arctan(np.gradient(elevation, dist))
-    v_safe = np.zeros_like(dist)
-    g = 9.81
-    v_safe[-1] = 0
-    for i in range(len(dist) - 2, -1, -1):
-        if width_map[i] < robot_width:
-            v_safe[i] = 0
-            continue
-        theta = slopes[i]
-        mu = friction_map[i]
-        ds = dist[i+1] - dist[i]
-        max_decel = (mu * g * np.cos(theta)) - (g * np.sin(theta))
-        v_safe[i] = np.sqrt(max(0, v_safe[i+1]**2 + 2 * max_decel * ds))
-    return np.minimum(v_safe, max_speed)
+def braking_distance(v, mu):
+    return v**2 / (2 * mu * g)
 
-def check_chassis_geometry(w_base, clearance, elevation, dist):
-    slopes = np.degrees(np.arctan(np.gradient(elevation, dist)))
-    limit = np.degrees(np.arctan((2 * clearance) / w_base))
-    crest_severity = np.abs(np.diff(slopes))
-    max_sev = np.max(crest_severity) if len(crest_severity) > 0 else 0
-    return max_sev < limit, max_sev, limit
+def max_turn_speed(radius, mu):
+    return np.sqrt(mu * g * radius)
 
-def get_chaos_bounds(dist, elevation, friction_map, width_map, r_mass, r_v_max, r_width):
-    all_ghosts = []
-    for _ in range(10):
-        v_mass = r_mass * np.random.uniform(0.9, 1.2)
-        v_mu = friction_map * np.random.uniform(0.7, 1.0)
-        v_ghost = get_safe_velocity(dist, elevation, v_mu, width_map, v_mass, r_v_max, r_width)
-        all_ghosts.append(v_ghost)
-    all_ghosts = np.array(all_ghosts)
-    return np.min(all_ghosts, axis=0), np.max(all_ghosts, axis=0)
+def slip_detect(v, mu):
+    limit = np.sqrt(mu * g * 10)
+    return v > limit
 
 # ---------------------------------------------------------
-# 3. SIDEBAR & UI SETTINGS
+# AI PATH PLANNER (A*)
 # ---------------------------------------------------------
-st.set_page_config(layout="wide", page_title="World Auditor | Lab")
-st.title("🛡️ World-Auditor: Terrain & Chassis Lab")
+
+def astar(grid,start,goal):
+
+    h=lambda a,b: abs(a[0]-b[0])+abs(a[1]-b[1])
+
+    open_set=[]
+    heapq.heappush(open_set,(0,start))
+
+    came={}
+    gscore={start:0}
+
+    while open_set:
+
+        _,current=heapq.heappop(open_set)
+
+        if current==goal:
+            path=[current]
+            while current in came:
+                current=came[current]
+                path.append(current)
+            return path[::-1]
+
+        x,y=current
+
+        for dx,dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+
+            nx,ny=x+dx,y+dy
+
+            if nx<0 or ny<0 or nx>=grid.shape[0] or ny>=grid.shape[1]:
+                continue
+
+            if grid[nx,ny]==1:
+                continue
+
+            tentative=gscore[current]+1
+
+            if (nx,ny) not in gscore or tentative<gscore[(nx,ny)]:
+
+                came[(nx,ny)]=current
+                gscore[(nx,ny)]=tentative
+                f=tentative+h((nx,ny),goal)
+                heapq.heappush(open_set,(f,(nx,ny)))
+
+    return []
+
+# ---------------------------------------------------------
+# SIDEBAR CONFIG
+# ---------------------------------------------------------
 
 with st.sidebar:
-    st.header("🤖 Robot Config")
-    r_mass = st.number_input("Mass (kg)", 500, 5000, 1200)
-    r_v_max = st.slider("Max Speed (m/s)", 5, 40, 20)
-    r_width = st.slider("Robot Width (m)", 0.5, 3.0, 1.8)
-    r_wheelbase = st.slider("Wheelbase (m)", 0.5, 4.0, 2.5)
-    r_clearance = st.slider("Ground Clearance (m)", 0.05, 0.5, 0.20)
-    
-    st.divider()
-    st.header("🏁 Race Conditions")
-    track_condition = st.radio("Weather", ["Dry", "Wet"], horizontal=True)
-    global_width = st.number_input("Standard Track Width (m)", 1.0, 10.0, 5.0)
-    tire_type = st.selectbox("Tire Compound", list(TIRE_PROFILES.keys()))
-    
-    st.divider()
-    chaos_mode = st.toggle("Enable Chaos Mode", value=True)
-    use_painter = st.toggle("Use Painter Data", value=False)
+
+    st.header("Robot")
+
+    mass=st.slider("Mass",200,2000,800)
+    max_speed=st.slider("Max speed",5,40,20)
+    width=st.slider("Robot width",0.5,2.5,1.2)
+    wheelbase=st.slider("Wheelbase",0.5,3.5,1.6)
+    clearance=st.slider("Ground clearance",0.05,0.5,0.2)
+
+    st.header("Environment")
+
+    terrain_seed=st.slider("Terrain seed",0,100,42)
+    generate=st.button("Generate Terrain")
 
 # ---------------------------------------------------------
-# 4. PATH PAINTER & LEGEND
+# TERRAIN GENERATION
 # ---------------------------------------------------------
-st.write("### 🎨 Surface Material Legend")
-cols = st.columns(len(SURFACE_PHYSICS))
-for i, (name, data) in enumerate(SURFACE_PHYSICS.items()):
-    cols[i].markdown(f"<div style='background-color:{data['color']}; height:10px; border-radius:5px;'></div>", unsafe_allow_html=True)
-    cols[i].caption(name)
 
-# (Ensure this brush_color variable is exactly what the color_picker outputs)
-brush_color = st.color_picker("Pick Surface Material (Color)", "#000000")
+np.random.seed(terrain_seed)
 
-canvas_result = st_canvas(
-    stroke_width=4, 
-    stroke_color=brush_color, # FIXED: This must match the picker variable
-    background_color="#0E1117",
-    height=250, 
-    drawing_mode="freedraw", 
-    key="canvas"
+track_len=400
+dist=np.linspace(0,track_len,400)
+
+base=np.sin(dist*0.03)*3
+noise=np.random.normal(0,0.3,len(dist))
+
+elevation=base+noise
+
+friction=np.ones_like(dist)
+
+# ---------------------------------------------------------
+# PAINTER
+# ---------------------------------------------------------
+
+st.subheader("Terrain Painter")
+
+mode=st.selectbox("Painter Mode",
+["Elevation","Friction","Obstacles"])
+
+brush_surface=st.selectbox(
+"Surface",
+list(SURFACE_PHYSICS.keys())
+)
+
+brush_color=SURFACE_PHYSICS[brush_surface]["color"]
+
+canvas=st_canvas(
+stroke_width=5,
+stroke_color=brush_color,
+height=250,
+background_color="#0E1117",
+drawing_mode="freedraw",
+key="canvas"
 )
 
 # ---------------------------------------------------------
-# 5. DYNAMIC WORLD MODELING
+# CANVAS PROCESSING
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# 5. DYNAMIC WORLD MODELING (Solid Color Mapping)
-# ---------------------------------------------------------
-track_len = 400
-dist = np.linspace(0, track_len, 400)
 
-# A. Tire & Weather Logic
-t_cfg = TIRE_PROFILES[tire_type]
-weather_mod = (1.0 - t_cfg["wet_penalty"]) if track_condition == "Wet" else 1.0
+obstacles=[]
 
-# B. Initialize Base Maps
-width_map = np.full_like(dist, global_width)
-base_mu = SURFACE_PHYSICS["Tarmac (Black)"]["mu"] * t_cfg["base_mod"] * weather_mod
-friction_map = np.full_like(dist, base_mu)
-elevation = 5 * np.sin(dist * 0.04) # Default fallback
+if canvas.json_data:
 
-# C. Process Painter Overrides (Discrete Zones)
-# C. Process Painter Overrides (Discrete Zones)
-if use_painter and canvas_result.json_data is not None:
-    objects = canvas_result.json_data.get("objects")
-    if objects:
-        for idx, obj in enumerate(objects):
-            stroke_color = obj.get("stroke", "#000000").upper()
-            path_points = obj.get("path", [])
-            
-            if len(path_points) > 1:
-                # 1. Elevation from FIRST stroke
-                if idx == 0:
-                    raw_y = np.array([p[2] for p in path_points])
-                    elevation = np.interp(dist, np.linspace(0, track_len, len(raw_y)), (250 - raw_y) / 10)
-                
-                # 2. Friction Zones
-                x_coords = np.array([p[1] for p in path_points])
-                m_start = np.min(x_coords) * (track_len / 600)
-                m_end = np.max(x_coords) * (track_len / 600)
-                
-                # FIX: Keep this inside the 'if len(path_points) > 1' block
-                for name, data in SURFACE_PHYSICS.items():
-                    if data["color"].upper() == stroke_color:
-                        mask = (dist >= m_start) & (dist <= m_end)
-                        friction_map[mask] = data["mu"] * t_cfg["base_mod"] * weather_mod
+    for obj in canvas.json_data["objects"]:
+
+        color=obj["stroke"]
+
+        xs=[p[1] for p in obj["path"]]
+        ys=[p[2] for p in obj["path"]]
+
+        m_start=min(xs)/600*track_len
+        m_end=max(xs)/600*track_len
+
+        mask=(dist>=m_start)&(dist<=m_end)
+
+        if mode=="Elevation":
+            elev=(250-np.array(ys))/20
+            elevation=np.interp(dist,
+                                np.linspace(0,track_len,len(elev)),
+                                elev)
+
+        elif mode=="Friction":
+
+            for name,data in SURFACE_PHYSICS.items():
+                if data["color"]==color:
+                    friction[mask]=data["mu"]
+
+        elif mode=="Obstacles":
+
+            obstacles.append((m_start,0))
 
 # ---------------------------------------------------------
-# 6. CALCULATIONS & VISUALIZATION
+# SAFE SPEED PROFILE
 # ---------------------------------------------------------
-safe_v_base = get_safe_velocity(dist, elevation, friction_map, width_map, r_mass, r_v_max, r_width)
-is_clear, peak_sev, crit_limit = check_chassis_geometry(r_wheelbase, r_clearance, elevation, dist)
-# --- ROBOT ANIMATION CONTROL ---
-st.divider()
-st.subheader("🏃 Real-Time Simulation")
 
-sim_pos = st.slider("Manual Drive / Playback", 0, int(track_len), 0, help="Slide to move the robot along the track")
+safe_v=np.zeros_like(dist)
 
-# --- AUTO-PLAY ENGINE ---
-if "run_sim" not in st.session_state:
-    st.session_state.run_sim = False
+for i in range(len(dist)-2,-1,-1):
 
-def toggle_sim():
-    st.session_state.run_sim = not st.session_state.run_sim
+    mu=friction[i]
 
-st.button("▶️ Play / ⏸️ Pause Animation", on_click=toggle_sim)
+    ds=dist[i+1]-dist[i]
 
-# If Play is active, increment the slider automatically
-if st.session_state.run_sim:
-    if sim_pos < track_len:
-        st.session_state.sim_pos = sim_pos + 5 # Adjust speed here
-        st.rerun()
-    else:
-        st.session_state.run_sim = False
-        st.session_state.sim_pos = 0
+    a=mu*g
 
+    safe_v[i]=min(max_speed,
+        np.sqrt(safe_v[i+1]**2+2*a*ds))
 
-# Find the index in our arrays that matches the slider position
-sim_idx = np.argmin(np.abs(dist - sim_pos))
-robot_x = dist[sim_idx]
-robot_y = elevation[sim_idx]
-robot_v = safe_v_base[sim_idx]
+# ---------------------------------------------------------
+# SIMULATION ENGINE
+# ---------------------------------------------------------
 
-fig = go.Figure()
+if "sim_pos" not in st.session_state:
+    st.session_state.sim_pos=0
 
-# Background Chaos Heatmap
-if chaos_mode:
-    v_min, v_max = get_chaos_bounds(dist, elevation, friction_map, width_map, r_mass, r_v_max, r_width)
-    fig.add_trace(go.Scatter(x=dist, y=v_max, line=dict(width=0), showlegend=False, hoverinfo='skip'))
-    fig.add_trace(go.Scatter(x=dist, y=v_min, fill='tonexty', fillcolor='rgba(255, 75, 75, 0.2)', line=dict(width=0), name="Chaos Envelope"))
+play=st.button("Play Simulation")
 
-# Terrain & Safety
-fig.add_trace(go.Scatter(x=dist, y=elevation, fill='tozeroy', name="Terrain", line=dict(color='gray', width=1)))
-fig.add_trace(go.Scatter(x=dist, y=safe_v_base, name="Safe Velocity", line=dict(color='#00CC96', width=4)))
-fig.add_trace(go.Scatter(x=dist, y=friction_map * 10, name="Grip (μ x 10)", line=dict(color='orange', dash='dot')))
+if play:
+    st.session_state.run=True
 
-fig.update_layout(template="plotly_dark", height=600, xaxis_title="Distance (m)", yaxis_title="m/s | Elevation")
-st.plotly_chart(fig, use_container_width=True)
+if "run" not in st.session_state:
+    st.session_state.run=False
 
-# --- THE ROBOT (Tiny Point) ---
+if st.session_state.run:
+
+    st.session_state.sim_pos+=3
+
+    if st.session_state.sim_pos>=track_len:
+        st.session_state.run=False
+        st.session_state.sim_pos=0
+
+    st.rerun()
+
+pos=st.session_state.sim_pos
+
+idx=np.argmin(abs(dist-pos))
+
+robot_x=dist[idx]
+robot_y=elevation[idx]
+robot_v=safe_v[idx]
+
+# ---------------------------------------------------------
+# BRAKE DISTANCE
+# ---------------------------------------------------------
+
+mu_now=friction[idx]
+
+brake_d=braking_distance(robot_v,mu_now)
+
+# ---------------------------------------------------------
+# SLIP DETECTION
+# ---------------------------------------------------------
+
+slip=slip_detect(robot_v,mu_now)
+
+# ---------------------------------------------------------
+# 2D VISUALIZATION
+# ---------------------------------------------------------
+
+fig=go.Figure()
+
 fig.add_trace(go.Scatter(
-    x=dist, 
-    y=friction_map * 10, 
-    name="Grip (μ x 10)", 
-    # 'hv' ensures the line stays horizontal until it hits a new zone
-    line=dict(color='orange', dash='dot', shape='hv'), 
-    fill='tozeroy',
-    opacity=0.3
+x=dist,
+y=elevation,
+fill="tozeroy",
+name="Terrain"
 ))
 
-# ---------------------------------------------------------
-# 7. RESULTS
-# ---------------------------------------------------------
-c1, c2, c3 = st.columns(3)
-with c1: st.metric("Chassis Status", "✅ CLEAR" if is_clear else "❌ CRITICAL")
-with c2: st.metric("Weather Impact", track_condition, delta=f"{weather_mod:.1f}x Grip")
-with c3: st.metric("Avg Safe Speed", f"{np.mean(safe_v_base):.1f} m/s")
+fig.add_trace(go.Scatter(
+x=dist,
+y=safe_v,
+name="Safe Speed"
+))
 
-# --- 8. SURFACE TELEMETRY ---
-st.write("### 📊 Journey Composition")
-surface_counts = {}
-for i in range(len(dist)):
-    # Match current friction to a surface name
-    for name, data in SURFACE_PHYSICS.items():
-        # Check if current friction matches the surface's mu (adjusted for weather/tires)
-        target_mu = data["mu"] * t_cfg["base_mod"] * weather_mod
-        if np.isclose(friction_map[i], target_mu, atol=0.01):
-            surface_counts[name] = surface_counts.get(name, 0) + 1
-            break
+# robot body
 
-# Display as mini-dashboard
-t_cols = st.columns(len(surface_counts))
-for i, (surface, count) in enumerate(surface_counts.items()):
-    distance_m = count * (track_len / len(dist))
-    t_cols[i].caption(surface)
-    t_cols[i].write(f"**{distance_m:.0f}m**")
+fig.add_trace(go.Scatter(
+x=[robot_x],
+y=[robot_y],
+mode="markers",
+marker=dict(size=14,color="red"),
+name="Robot"
+))
+
+# brake distance line
+
+fig.add_shape(
+type="line",
+x0=robot_x,
+x1=robot_x+brake_d,
+y0=robot_y,
+y1=robot_y,
+line=dict(color="yellow",dash="dash")
+)
+
+fig.update_layout(
+template="plotly_dark",
+height=500
+)
+
+st.plotly_chart(fig,use_container_width=True)
+
+# ---------------------------------------------------------
+# 3D TERRAIN
+# ---------------------------------------------------------
+
+st.subheader("3D Terrain")
+
+X=np.tile(dist,(20,1))
+Y=np.tile(np.linspace(-5,5,20),(len(dist),1)).T
+Z=np.tile(elevation,(20,1))
+
+fig3d=go.Figure(
+data=[go.Surface(
+x=X,
+y=Y,
+z=Z,
+colorscale="Viridis"
+)]
+)
+
+fig3d.update_layout(
+template="plotly_dark",
+height=600
+)
+
+st.plotly_chart(fig3d,use_container_width=True)
+
+# ---------------------------------------------------------
+# TELEMETRY
+# ---------------------------------------------------------
+
+c1,c2,c3,c4=st.columns(4)
+
+c1.metric("Speed",f"{robot_v:.1f} m/s")
+c2.metric("Brake distance",f"{brake_d:.1f} m")
+c3.metric("Friction μ",f"{mu_now:.2f}")
+c4.metric("Slip Risk","YES" if slip else "NO")
+
+# ---------------------------------------------------------
+# OBSTACLE VISUALIZATION
+# ---------------------------------------------------------
+
+if obstacles:
+
+    st.warning(f"{len(obstacles)} obstacles detected on track")
