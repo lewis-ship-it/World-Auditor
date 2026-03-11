@@ -6,330 +6,292 @@ import heapq
 
 st.set_page_config(layout="wide", page_title="World Auditor Lab")
 
+st.title("World Auditor Robot Navigation Lab")
+
 # ---------------------------------------------------------
-# PHYSICS CONSTANTS
+# CONSTANTS
 # ---------------------------------------------------------
 
+GRID = 60
+CELL = 6
 g = 9.81
 
-SURFACE_PHYSICS = {
-    "Tarmac": {"color": "#000000", "mu": 1.0},
-    "Concrete": {"color": "#808080", "mu": 0.9},
-    "Grass": {"color": "#228B22", "mu": 0.35},
-    "Mud": {"color": "#8B4513", "mu": 0.2},
-    "Ice": {"color": "#ADD8E6", "mu": 0.05}
+SURFACES = {
+    "Tarmac": {"color":"#000000","mu":1.0},
+    "Concrete":{"color":"#808080","mu":0.9},
+    "Grass":{"color":"#228B22","mu":0.35},
+    "Mud":{"color":"#8B4513","mu":0.2},
+    "Ice":{"color":"#ADD8E6","mu":0.05}
 }
 
 # ---------------------------------------------------------
-# ROBOT PHYSICS
-# ---------------------------------------------------------
-
-def braking_distance(v, mu):
-    return v**2 / (2 * mu * g)
-
-def max_turn_speed(radius, mu):
-    return np.sqrt(mu * g * radius)
-
-def slip_detect(v, mu):
-    limit = np.sqrt(mu * g * 10)
-    return v > limit
-
-# ---------------------------------------------------------
-# AI PATH PLANNER (A*)
-# ---------------------------------------------------------
-
-def astar(grid,start,goal):
-
-    h=lambda a,b: abs(a[0]-b[0])+abs(a[1]-b[1])
-
-    open_set=[]
-    heapq.heappush(open_set,(0,start))
-
-    came={}
-    gscore={start:0}
-
-    while open_set:
-
-        _,current=heapq.heappop(open_set)
-
-        if current==goal:
-            path=[current]
-            while current in came:
-                current=came[current]
-                path.append(current)
-            return path[::-1]
-
-        x,y=current
-
-        for dx,dy in [(1,0),(-1,0),(0,1),(0,-1)]:
-
-            nx,ny=x+dx,y+dy
-
-            if nx<0 or ny<0 or nx>=grid.shape[0] or ny>=grid.shape[1]:
-                continue
-
-            if grid[nx,ny]==1:
-                continue
-
-            tentative=gscore[current]+1
-
-            if (nx,ny) not in gscore or tentative<gscore[(nx,ny)]:
-
-                came[(nx,ny)]=current
-                gscore[(nx,ny)]=tentative
-                f=tentative+h((nx,ny),goal)
-                heapq.heappush(open_set,(f,(nx,ny)))
-
-    return []
-
-# ---------------------------------------------------------
-# SIDEBAR CONFIG
+# SIDEBAR
 # ---------------------------------------------------------
 
 with st.sidebar:
 
     st.header("Robot")
 
-    mass=st.slider("Mass",200,2000,800)
-    max_speed=st.slider("Max speed",5,40,20)
-    width=st.slider("Robot width",0.5,2.5,1.2)
-    wheelbase=st.slider("Wheelbase",0.5,3.5,1.6)
-    clearance=st.slider("Ground clearance",0.05,0.5,0.2)
+    mass = st.slider("Mass",200,2000,800)
+    max_speed = st.slider("Max Speed",5,30,15)
 
-    st.header("Environment")
+    st.header("Painter Mode")
 
-    terrain_seed=st.slider("Terrain seed",0,100,42)
-    generate=st.button("Generate Terrain")
+    mode = st.selectbox(
+        "Mode",
+        ["Elevation","Friction","Obstacle","Start","Goal"]
+    )
 
-# ---------------------------------------------------------
-# TERRAIN GENERATION
-# ---------------------------------------------------------
+    surface = st.selectbox(
+        "Surface",
+        list(SURFACES.keys())
+    )
 
-np.random.seed(terrain_seed)
-
-track_len=400
-dist=np.linspace(0,track_len,400)
-
-base=np.sin(dist*0.03)*3
-noise=np.random.normal(0,0.3,len(dist))
-
-elevation=base+noise
-
-friction=np.ones_like(dist)
+brush_color = SURFACES[surface]["color"]
 
 # ---------------------------------------------------------
-# PAINTER
+# MAP STORAGE
 # ---------------------------------------------------------
 
-st.subheader("Terrain Painter")
+if "elevation" not in st.session_state:
+    st.session_state.elevation = np.zeros((GRID,GRID))
 
-mode=st.selectbox("Painter Mode",
-["Elevation","Friction","Obstacles"])
+if "friction" not in st.session_state:
+    st.session_state.friction = np.ones((GRID,GRID))
 
-brush_surface=st.selectbox(
-"Surface",
-list(SURFACE_PHYSICS.keys())
+if "obstacle" not in st.session_state:
+    st.session_state.obstacle = np.zeros((GRID,GRID))
+
+if "start" not in st.session_state:
+    st.session_state.start = None
+
+if "goal" not in st.session_state:
+    st.session_state.goal = None
+
+# ---------------------------------------------------------
+# CANVAS
+# ---------------------------------------------------------
+
+canvas = st_canvas(
+    stroke_width=6,
+    stroke_color=brush_color,
+    background_color="#111",
+    height=360,
+    width=360,
+    drawing_mode="freedraw",
+    key="map"
 )
 
-brush_color=SURFACE_PHYSICS[brush_surface]["color"]
-
-canvas=st_canvas(
-stroke_width=5,
-stroke_color=brush_color,
-height=250,
-background_color="#0E1117",
-drawing_mode="freedraw",
-key="canvas"
-)
-
 # ---------------------------------------------------------
-# CANVAS PROCESSING
+# PROCESS DRAWINGS
 # ---------------------------------------------------------
-
-obstacles=[]
 
 if canvas.json_data:
 
-    for obj in canvas.json_data["objects"]:
+    objects = canvas.json_data["objects"]
 
-        color=obj["stroke"]
+    for obj in objects:
 
-        xs=[p[1] for p in obj["path"]]
-        ys=[p[2] for p in obj["path"]]
+        xs = [p[1] for p in obj["path"]]
+        ys = [p[2] for p in obj["path"]]
 
-        m_start=min(xs)/600*track_len
-        m_end=max(xs)/600*track_len
+        gx = int(np.mean(xs)/360*GRID)
+        gy = int(np.mean(ys)/360*GRID)
 
-        mask=(dist>=m_start)&(dist<=m_end)
+        gx = np.clip(gx,0,GRID-1)
+        gy = np.clip(gy,0,GRID-1)
 
-        if mode=="Elevation":
-            elev=(250-np.array(ys))/20
-            elevation=np.interp(dist,
-                                np.linspace(0,track_len,len(elev)),
-                                elev)
+        if mode=="Start":
+            st.session_state.start=(gx,gy)
+
+        elif mode=="Goal":
+            st.session_state.goal=(gx,gy)
+
+        elif mode=="Obstacle":
+            st.session_state.obstacle[gx,gy]=1
 
         elif mode=="Friction":
+            mu=SURFACES[surface]["mu"]
+            st.session_state.friction[gx,gy]=mu
 
-            for name,data in SURFACE_PHYSICS.items():
-                if data["color"]==color:
-                    friction[mask]=data["mu"]
-
-        elif mode=="Obstacles":
-
-            obstacles.append((m_start,0))
+        elif mode=="Elevation":
+            st.session_state.elevation[gx,gy]+=0.3
 
 # ---------------------------------------------------------
-# SAFE SPEED PROFILE
+# A* PATH PLANNER
 # ---------------------------------------------------------
 
-safe_v=np.zeros_like(dist)
+def astar(grid,start,goal):
 
-for i in range(len(dist)-2,-1,-1):
+    h=lambda a,b:abs(a[0]-b[0])+abs(a[1]-b[1])
 
-    mu=friction[i]
+    open=[]
+    heapq.heappush(open,(0,start))
 
-    ds=dist[i+1]-dist[i]
+    came={}
+    cost={start:0}
 
-    a=mu*g
+    while open:
 
-    safe_v[i]=min(max_speed,
-        np.sqrt(safe_v[i+1]**2+2*a*ds))
+        _,cur=heapq.heappop(open)
 
-# ---------------------------------------------------------
-# SIMULATION ENGINE
-# ---------------------------------------------------------
+        if cur==goal:
+            path=[cur]
+            while cur in came:
+                cur=came[cur]
+                path.append(cur)
+            return path[::-1]
 
-if "sim_pos" not in st.session_state:
-    st.session_state.sim_pos=0
+        x,y=cur
 
-play=st.button("Play Simulation")
+        for dx,dy in [(1,0),(-1,0),(0,1),(0,-1)]:
 
-if play:
-    st.session_state.run=True
+            nx=x+dx
+            ny=y+dy
 
-if "run" not in st.session_state:
-    st.session_state.run=False
+            if nx<0 or ny<0 or nx>=GRID or ny>=GRID:
+                continue
 
-if st.session_state.run:
+            if grid[nx,ny]==1:
+                continue
 
-    st.session_state.sim_pos+=3
+            new=cost[cur]+1
 
-    if st.session_state.sim_pos>=track_len:
-        st.session_state.run=False
-        st.session_state.sim_pos=0
+            if (nx,ny) not in cost or new<cost[(nx,ny)]:
 
-    st.rerun()
+                cost[(nx,ny)]=new
+                came[(nx,ny)]=cur
+                heapq.heappush(open,(new+h((nx,ny),goal),(nx,ny)))
 
-pos=st.session_state.sim_pos
-
-idx=np.argmin(abs(dist-pos))
-
-robot_x=dist[idx]
-robot_y=elevation[idx]
-robot_v=safe_v[idx]
+    return []
 
 # ---------------------------------------------------------
-# BRAKE DISTANCE
+# BUILD GRID
 # ---------------------------------------------------------
 
-mu_now=friction[idx]
+grid = st.session_state.obstacle.copy()
 
-brake_d=braking_distance(robot_v,mu_now)
+path=[]
 
-# ---------------------------------------------------------
-# SLIP DETECTION
-# ---------------------------------------------------------
+if st.session_state.start and st.session_state.goal:
 
-slip=slip_detect(robot_v,mu_now)
+    path=astar(grid,st.session_state.start,st.session_state.goal)
 
 # ---------------------------------------------------------
-# 2D VISUALIZATION
+# SIMULATION
 # ---------------------------------------------------------
+
+if "robot_i" not in st.session_state:
+    st.session_state.robot_i=0
+
+if st.button("Run Robot"):
+    st.session_state.robot_i=0
+    st.session_state.running=True
+
+if "running" not in st.session_state:
+    st.session_state.running=False
+
+if st.session_state.running and path:
+
+    st.session_state.robot_i+=1
+
+    if st.session_state.robot_i>=len(path):
+        st.session_state.running=False
+    else:
+        st.rerun()
+
+robot=None
+
+if path:
+
+    robot=path[min(st.session_state.robot_i,len(path)-1)]
+
+# ---------------------------------------------------------
+# PHYSICS
+# ---------------------------------------------------------
+
+speed=max_speed
+
+if robot:
+
+    mu=st.session_state.friction[robot]
+
+    brake=(speed**2)/(2*mu*g)
+
+    slip=speed>np.sqrt(mu*g*5)
+
+# ---------------------------------------------------------
+# VISUALIZATION
+# ---------------------------------------------------------
+
+z=st.session_state.elevation
 
 fig=go.Figure()
 
-fig.add_trace(go.Scatter(
-x=dist,
-y=elevation,
-fill="tozeroy",
-name="Terrain"
+fig.add_trace(go.Surface(
+    z=z,
+    colorscale="Viridis",
+    showscale=False
 ))
 
-fig.add_trace(go.Scatter(
-x=dist,
-y=safe_v,
-name="Safe Speed"
-))
+if path:
 
-# robot body
+    xs=[p[0] for p in path]
+    ys=[p[1] for p in path]
 
-fig.add_trace(go.Scatter(
-x=[robot_x],
-y=[robot_y],
-mode="markers",
-marker=dict(size=14,color="red"),
-name="Robot"
-))
+    fig.add_trace(go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=z[xs,ys]+0.5,
+        mode="lines",
+        line=dict(color="yellow",width=6),
+        name="Path"
+    ))
 
-# brake distance line
+if robot:
 
-fig.add_shape(
-type="line",
-x0=robot_x,
-x1=robot_x+brake_d,
-y0=robot_y,
-y1=robot_y,
-line=dict(color="yellow",dash="dash")
-)
+    fig.add_trace(go.Scatter3d(
+        x=[robot[0]],
+        y=[robot[1]],
+        z=[z[robot]+1],
+        mode="markers",
+        marker=dict(size=6,color="red"),
+        name="Robot"
+    ))
 
 fig.update_layout(
-template="plotly_dark",
-height=500
+    template="plotly_dark",
+    height=650
 )
 
 st.plotly_chart(fig,use_container_width=True)
 
 # ---------------------------------------------------------
-# 3D TERRAIN
-# ---------------------------------------------------------
-
-st.subheader("3D Terrain")
-
-X=np.tile(dist,(20,1))
-Y=np.tile(np.linspace(-5,5,20),(len(dist),1)).T
-Z=np.tile(elevation,(20,1))
-
-fig3d=go.Figure(
-data=[go.Surface(
-x=X,
-y=Y,
-z=Z,
-colorscale="Viridis"
-)]
-)
-
-fig3d.update_layout(
-template="plotly_dark",
-height=600
-)
-
-st.plotly_chart(fig3d,use_container_width=True)
-
-# ---------------------------------------------------------
 # TELEMETRY
 # ---------------------------------------------------------
 
-c1,c2,c3,c4=st.columns(4)
+if robot:
 
-c1.metric("Speed",f"{robot_v:.1f} m/s")
-c2.metric("Brake distance",f"{brake_d:.1f} m")
-c3.metric("Friction μ",f"{mu_now:.2f}")
-c4.metric("Slip Risk","YES" if slip else "NO")
+    c1,c2,c3=st.columns(3)
+
+    c1.metric("Speed",f"{speed:.1f} m/s")
+    c2.metric("Brake Distance",f"{brake:.1f} m")
+    c3.metric("Slip Risk","YES" if slip else "NO")
 
 # ---------------------------------------------------------
-# OBSTACLE VISUALIZATION
+# HELP
 # ---------------------------------------------------------
 
-if obstacles:
+st.info(
+"""
+How to use:
 
-    st.warning(f"{len(obstacles)} obstacles detected on track")
+1. Select **Start** mode and click map
+2. Select **Goal** mode and click map
+3. Draw **Obstacles**
+4. Paint **Friction surfaces**
+5. Press **Run Robot**
+
+Robot will compute a path and drive the map.
+"""
+)
