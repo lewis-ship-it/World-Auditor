@@ -132,6 +132,7 @@ friction_map = np.full_like(dist, base_mu)
 elevation = 5 * np.sin(dist * 0.04) # Default fallback
 
 # C. Process Painter Overrides (Discrete Zones)
+# C. Process Painter Overrides (Discrete Zones)
 if use_painter and canvas_result.json_data is not None:
     objects = canvas_result.json_data.get("objects")
     if objects:
@@ -140,21 +141,19 @@ if use_painter and canvas_result.json_data is not None:
             path_points = obj.get("path", [])
             
             if len(path_points) > 1:
-                # 1. Elevation comes from the FIRST stroke only
+                # 1. Elevation from FIRST stroke
                 if idx == 0:
                     raw_y = np.array([p[2] for p in path_points])
                     elevation = np.interp(dist, np.linspace(0, track_len, len(raw_y)), (250 - raw_y) / 10)
                 
-                # 2. Friction Zones (Discrete Color Detection)
-                # Map horizontal stroke range to distance array
+                # 2. Friction Zones
                 x_coords = np.array([p[1] for p in path_points])
-                m_start = np.min(x_coords) * (track_len / 600) # Mapping 600px canvas to 400m
+                m_start = np.min(x_coords) * (track_len / 600)
                 m_end = np.max(x_coords) * (track_len / 600)
                 
-                # Check which specific surface was selected
+                # FIX: Keep this inside the 'if len(path_points) > 1' block
                 for name, data in SURFACE_PHYSICS.items():
                     if data["color"].upper() == stroke_color:
-                        # Apply solid friction to this specific distance mask
                         mask = (dist >= m_start) & (dist <= m_end)
                         friction_map[mask] = data["mu"] * t_cfg["base_mod"] * weather_mod
 
@@ -166,6 +165,9 @@ is_clear, peak_sev, crit_limit = check_chassis_geometry(r_wheelbase, r_clearance
 # --- ROBOT ANIMATION CONTROL ---
 st.divider()
 st.subheader("🏃 Real-Time Simulation")
+
+sim_pos = st.slider("Manual Drive / Playback", 0, int(track_len), 0, help="Slide to move the robot along the track")
+
 # --- AUTO-PLAY ENGINE ---
 if "run_sim" not in st.session_state:
     st.session_state.run_sim = False
@@ -183,7 +185,7 @@ if st.session_state.run_sim:
     else:
         st.session_state.run_sim = False
         st.session_state.sim_pos = 0
-sim_pos = st.slider("Manual Drive / Playback", 0, int(track_len), 0, help="Slide to move the robot along the track")
+
 
 # Find the index in our arrays that matches the slider position
 sim_idx = np.argmin(np.abs(dist - sim_pos))
@@ -209,13 +211,13 @@ st.plotly_chart(fig, use_container_width=True)
 
 # --- THE ROBOT (Tiny Point) ---
 fig.add_trace(go.Scatter(
-    x=[robot_x], 
-    y=[robot_y + 0.5], # Offset slightly above ground
-    mode="markers+text",
-    marker=dict(symbol="car", size=15, color="yellow", line=dict(width=2, color="white")),
-    text=[f" {robot_v:.1f} m/s"],
-    textposition="top center",
-    name="Robot Digital Twin"
+    x=dist, 
+    y=friction_map * 10, 
+    name="Grip (μ x 10)", 
+    # 'hv' ensures the line stays horizontal until it hits a new zone
+    line=dict(color='orange', dash='dot', shape='hv'), 
+    fill='tozeroy',
+    opacity=0.3
 ))
 
 # ---------------------------------------------------------
