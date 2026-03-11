@@ -100,11 +100,16 @@ for i, (name, data) in enumerate(SURFACE_PHYSICS.items()):
     cols[i].markdown(f"<div style='background-color:{data['color']}; height:10px; border-radius:5px;'></div>", unsafe_allow_html=True)
     cols[i].caption(name)
 
+# (Ensure this brush_color variable is exactly what the color_picker outputs)
 brush_color = st.color_picker("Pick Surface Material (Color)", "#000000")
 
 canvas_result = st_canvas(
-    stroke_width=4, stroke_color=brush_color, background_color="#0E1117",
-    height=250, drawing_mode="freedraw", key="canvas"
+    stroke_width=4, 
+    stroke_color=brush_color, # FIXED: This must match the picker variable
+    background_color="#0E1117",
+    height=250, 
+    drawing_mode="freedraw", 
+    key="canvas"
 )
 
 # ---------------------------------------------------------
