@@ -161,6 +161,23 @@ is_clear, peak_sev, crit_limit = check_chassis_geometry(r_wheelbase, r_clearance
 # --- ROBOT ANIMATION CONTROL ---
 st.divider()
 st.subheader("🏃 Real-Time Simulation")
+# --- AUTO-PLAY ENGINE ---
+if "run_sim" not in st.session_state:
+    st.session_state.run_sim = False
+
+def toggle_sim():
+    st.session_state.run_sim = not st.session_state.run_sim
+
+st.button("▶️ Play / ⏸️ Pause Animation", on_click=toggle_sim)
+
+# If Play is active, increment the slider automatically
+if st.session_state.run_sim:
+    if sim_pos < track_len:
+        st.session_state.sim_pos = sim_pos + 5 # Adjust speed here
+        st.rerun()
+    else:
+        st.session_state.run_sim = False
+        st.session_state.sim_pos = 0
 sim_pos = st.slider("Manual Drive / Playback", 0, int(track_len), 0, help="Slide to move the robot along the track")
 
 # Find the index in our arrays that matches the slider position
@@ -190,7 +207,7 @@ fig.add_trace(go.Scatter(
     x=[robot_x], 
     y=[robot_y + 0.5], # Offset slightly above ground
     mode="markers+text",
-    marker=dict(symbol="bus", size=15, color="yellow", line=dict(width=2, color="white")),
+    marker=dict(symbol="car", size=15, color="yellow", line=dict(width=2, color="white")),
     text=[f" {robot_v:.1f} m/s"],
     textposition="top center",
     name="Robot Digital Twin"
