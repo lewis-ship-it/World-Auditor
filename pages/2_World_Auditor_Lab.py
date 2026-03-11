@@ -110,39 +110,46 @@ canvas_result = st_canvas(
 # ---------------------------------------------------------
 # 5. DYNAMIC WORLD MODELING
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 5. DYNAMIC WORLD MODELING (Solid Color Mapping)
+# ---------------------------------------------------------
 track_len = 400
 dist = np.linspace(0, track_len, 400)
 
-# Calculate Global Physics Factors
+# A. Tire & Weather Logic
 t_cfg = TIRE_PROFILES[tire_type]
 weather_mod = (1.0 - t_cfg["wet_penalty"]) if track_condition == "Wet" else 1.0
 
-# Initialize Maps
+# B. Initialize Base Maps
 width_map = np.full_like(dist, global_width)
 base_mu = SURFACE_PHYSICS["Tarmac (Black)"]["mu"] * t_cfg["base_mod"] * weather_mod
 friction_map = np.full_like(dist, base_mu)
 elevation = 5 * np.sin(dist * 0.04) # Default fallback
 
-# Process Painter Data
+# C. Process Painter Overrides (Discrete Zones)
 if use_painter and canvas_result.json_data is not None:
     objects = canvas_result.json_data.get("objects")
     if objects:
         for idx, obj in enumerate(objects):
             stroke_color = obj.get("stroke", "#000000").upper()
             path_points = obj.get("path", [])
+            
             if len(path_points) > 1:
-                # First stroke defines the Elevation
+                # 1. Elevation comes from the FIRST stroke only
                 if idx == 0:
                     raw_y = np.array([p[2] for p in path_points])
                     elevation = np.interp(dist, np.linspace(0, track_len, len(raw_y)), (250 - raw_y) / 10)
                 
-                # All strokes contribute to Friction Colors
+                # 2. Friction Zones (Discrete Color Detection)
+                # Map horizontal stroke range to distance array
                 x_coords = np.array([p[1] for p in path_points])
-                m_start = np.min(x_coords) * (track_len / 600) # Assuming 600px canvas
+                m_start = np.min(x_coords) * (track_len / 600) # Mapping 600px canvas to 400m
                 m_end = np.max(x_coords) * (track_len / 600)
                 
+                # Check which specific surface was selected
                 for name, data in SURFACE_PHYSICS.items():
                     if data["color"].upper() == stroke_color:
+                        # Apply solid friction to this specific distance mask
                         mask = (dist >= m_start) & (dist <= m_end)
                         friction_map[mask] = data["mu"] * t_cfg["base_mod"] * weather_mod
 
@@ -151,6 +158,16 @@ if use_painter and canvas_result.json_data is not None:
 # ---------------------------------------------------------
 safe_v_base = get_safe_velocity(dist, elevation, friction_map, width_map, r_mass, r_v_max, r_width)
 is_clear, peak_sev, crit_limit = check_chassis_geometry(r_wheelbase, r_clearance, elevation, dist)
+# --- ROBOT ANIMATION CONTROL ---
+st.divider()
+st.subheader("🏃 Real-Time Simulation")
+sim_pos = st.slider("Manual Drive / Playback", 0, int(track_len), 0, help="Slide to move the robot along the track")
+
+# Find the index in our arrays that matches the slider position
+sim_idx = np.argmin(np.abs(dist - sim_pos))
+robot_x = dist[sim_idx]
+robot_y = elevation[sim_idx]
+robot_v = safe_v_base[sim_idx]
 
 fig = go.Figure()
 
@@ -168,6 +185,17 @@ fig.add_trace(go.Scatter(x=dist, y=friction_map * 10, name="Grip (μ x 10)", lin
 fig.update_layout(template="plotly_dark", height=600, xaxis_title="Distance (m)", yaxis_title="m/s | Elevation")
 st.plotly_chart(fig, use_container_width=True)
 
+# --- THE ROBOT (Tiny Point) ---
+fig.add_trace(go.Scatter(
+    x=[robot_x], 
+    y=[robot_y + 0.5], # Offset slightly above ground
+    mode="markers+text",
+    marker=dict(symbol="bus", size=15, color="yellow", line=dict(width=2, color="white")),
+    text=[f" {robot_v:.1f} m/s"],
+    textposition="top center",
+    name="Robot Digital Twin"
+))
+
 # ---------------------------------------------------------
 # 7. RESULTS
 # ---------------------------------------------------------
@@ -175,3 +203,22 @@ c1, c2, c3 = st.columns(3)
 with c1: st.metric("Chassis Status", "✅ CLEAR" if is_clear else "❌ CRITICAL")
 with c2: st.metric("Weather Impact", track_condition, delta=f"{weather_mod:.1f}x Grip")
 with c3: st.metric("Avg Safe Speed", f"{np.mean(safe_v_base):.1f} m/s")
+
+# --- 8. SURFACE TELEMETRY ---
+st.write("### 📊 Journey Composition")
+surface_counts = {}
+for i in range(len(dist)):
+    # Match current friction to a surface name
+    for name, data in SURFACE_PHYSICS.items():
+        # Check if current friction matches the surface's mu (adjusted for weather/tires)
+        target_mu = data["mu"] * t_cfg["base_mod"] * weather_mod
+        if np.isclose(friction_map[i], target_mu, atol=0.01):
+            surface_counts[name] = surface_counts.get(name, 0) + 1
+            break
+
+# Display as mini-dashboard
+t_cols = st.columns(len(surface_counts))
+for i, (surface, count) in enumerate(surface_counts.items()):
+    distance_m = count * (track_len / len(dist))
+    t_cols[i].caption(surface)
+    t_cols[i].write(f"**{distance_m:.0f}m**")
