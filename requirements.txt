@@ -9,3 +9,4 @@ opencv-contrib-python-headless
 numpy
 pillow
 scikit-learn
+streamlit-drawable-canvas
