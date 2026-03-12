@@ -19,11 +19,11 @@ if "robot_config" not in st.session_state:
     st.warning("⚠️ Please configure a robot in Robot Builder first")
     st.stop()
 
-robot_cfg = st.session_state.robot_config
+robot_cfg = st.session_state.get("robot_config", {})
 
-mass = robot_cfg["mass"]
-max_speed = robot_cfg["max_speed"]
-accel = robot_cfg["accel"]
+mass = robot_cfg.get("mass", 800)
+max_speed = robot_cfg.get("max_speed", 15)
+accel = robot_cfg.get("accel", 4)
 
 # ---------------------------------------------------------
 # CONSTANTS
