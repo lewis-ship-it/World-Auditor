@@ -236,7 +236,15 @@ if "robot_state" not in st.session_state:
 # RUN BUTTON
 # ---------------------------------------------------------
 
-if st.button("🚀 Run Audit"):
+# --- Update your Sidebar Start Button ---
+if st.button("▶️ Start Simulation"):
+    st.session_state.running = True
+    # FIX: Explicitly initialize "i" and "speed" here to prevent KeyErrors
+    st.session_state.robot_state = {
+        "pos": st.session_state.start, 
+        "speed": 0.0, 
+        "i": 0  # This was missing or being cleared
+    }
 
     if not path:
         st.error("Place start and goal points")
