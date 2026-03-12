@@ -6,7 +6,6 @@ import heapq
 import time
 
 st.set_page_config(layout="wide", page_title="World Auditor Lab")
-
 st.title("World Auditor Robot Navigation Lab")
 
 # ---------------------------------------------------------
@@ -56,27 +55,38 @@ with st.sidebar:
 brush_color = SURFACES[surface]["color"]
 
 # ---------------------------------------------------------
+# MATERIAL LEGEND
+# ---------------------------------------------------------
+
+st.write("### 🎨 Material Key")
+
+cols = st.columns(len(SURFACES))
+
+for i,(name,data) in enumerate(SURFACES.items()):
+    cols[i].markdown(
+        f"<div style='background-color:{data['color']};height:10px;border-radius:5px'></div>",
+        unsafe_allow_html=True
+    )
+    cols[i].caption(f"{name} (μ:{data['mu']})")
+
+# ---------------------------------------------------------
 # MAP STORAGE
 # ---------------------------------------------------------
 
-def init_map():
+if "elevation" not in st.session_state:
+    st.session_state.elevation = np.zeros((GRID,GRID))
 
-    if "elevation" not in st.session_state:
-        st.session_state.elevation = np.zeros((GRID,GRID))
+if "friction" not in st.session_state:
+    st.session_state.friction = np.ones((GRID,GRID))
 
-    if "friction" not in st.session_state:
-        st.session_state.friction = np.ones((GRID,GRID))
+if "obstacle" not in st.session_state:
+    st.session_state.obstacle = np.zeros((GRID,GRID))
 
-    if "obstacle" not in st.session_state:
-        st.session_state.obstacle = np.zeros((GRID,GRID))
+if "start" not in st.session_state:
+    st.session_state.start = None
 
-    if "start" not in st.session_state:
-        st.session_state.start = None
-
-    if "goal" not in st.session_state:
-        st.session_state.goal = None
-
-init_map()
+if "goal" not in st.session_state:
+    st.session_state.goal = None
 
 # ---------------------------------------------------------
 # CANVAS
@@ -105,11 +115,11 @@ if canvas.json_data:
             if len(p) < 3:
                 continue
 
-            x = int(p[1]/360 * GRID)
-            y = int(p[2]/360 * GRID)
+            x=int(p[1]/360*GRID)
+            y=int(p[2]/360*GRID)
 
-            x = np.clip(x,0,GRID-1)
-            y = np.clip(y,0,GRID-1)
+            x=np.clip(x,0,GRID-1)
+            y=np.clip(y,0,GRID-1)
 
             if mode=="Start":
                 st.session_state.start=(x,y)
@@ -121,16 +131,13 @@ if canvas.json_data:
                 st.session_state.obstacle[x,y]=1
 
             elif mode=="Friction":
-
-                mu=SURFACES[surface]["mu"]
-                st.session_state.friction[x,y]=mu
+                st.session_state.friction[x,y]=SURFACES[surface]["mu"]
 
             elif mode=="Elevation":
                 st.session_state.elevation[x,y]+=0.2
 
-
 # ---------------------------------------------------------
-# PATH PLANNER
+# A* PATH PLANNER
 # ---------------------------------------------------------
 
 def astar(grid,start,goal):
@@ -150,6 +157,7 @@ def astar(grid,start,goal):
         if cur==goal:
 
             path=[cur]
+
             while cur in came:
                 cur=came[cur]
                 path.append(cur)
@@ -160,8 +168,7 @@ def astar(grid,start,goal):
 
         for dx,dy in [(1,0),(-1,0),(0,1),(0,-1)]:
 
-            nx=x+dx
-            ny=y+dy
+            nx,ny=x+dx,y+dy
 
             if nx<0 or ny<0 or nx>=GRID or ny>=GRID:
                 continue
@@ -175,15 +182,16 @@ def astar(grid,start,goal):
 
                 cost[(nx,ny)]=new
                 came[(nx,ny)]=cur
+
                 heapq.heappush(open,(new+h((nx,ny),goal),(nx,ny)))
 
     return []
 
 # ---------------------------------------------------------
-# CURVATURE PHYSICS
+# CURVATURE SPEED
 # ---------------------------------------------------------
 
-def curvature_speed(path, friction):
+def curvature_speed(path,friction):
 
     speeds=[]
 
@@ -229,11 +237,13 @@ if st.session_state.start and st.session_state.goal:
 
     path=astar(grid,st.session_state.start,st.session_state.goal)
 
+speed_profile=[]
+
 if path:
     speed_profile=curvature_speed(path,st.session_state.friction)
 
 # ---------------------------------------------------------
-# ROBOT SIMULATION
+# ROBOT STATE
 # ---------------------------------------------------------
 
 if "robot_state" not in st.session_state:
@@ -244,7 +254,11 @@ if "robot_state" not in st.session_state:
         "speed":0
     }
 
-if st.button("Run Robot"):
+# ---------------------------------------------------------
+# RUN ROBOT
+# ---------------------------------------------------------
+
+if st.button("Run Robot") and path:
 
     st.session_state.robot_state["i"]=0
     st.session_state.robot_state["pos"]=np.array(path[0],dtype=float)
@@ -260,38 +274,42 @@ if st.session_state.running and path:
 
     s=st.session_state.robot_state
 
-    target=np.array(path[s["i"]])
-
-    direction=target-s["pos"]
-
-    dist=np.linalg.norm(direction)
-
-    if dist>0:
-        direction/=dist
-
-    desired_speed=speed_profile[s["i"]]
-
-    s["speed"]+=accel*dt
-    s["speed"]=min(s["speed"],desired_speed)
-
-    move=s["speed"]*dt
-
-    if move>dist:
-
-        s["i"]+=1
-
-        if s["i"]>=len(path):
-            st.session_state.running=False
-        else:
-            s["pos"]=target
+    if s["i"]>=len(path):
+        st.session_state.running=False
 
     else:
-        s["pos"]+=direction*move
 
-    robot=s["pos"]
+        target=np.array(path[s["i"]])
 
-    time.sleep(0.03)
-    st.rerun()
+        direction=target-s["pos"]
+        dist=np.linalg.norm(direction)
+
+        if dist>0:
+            direction/=dist
+
+        desired_speed=speed_profile[s["i"]]
+
+        s["speed"]+=accel*dt
+        s["speed"]=min(s["speed"],desired_speed)
+
+        move=s["speed"]*dt
+
+        if move>dist:
+
+            s["i"]+=1
+
+            if s["i"]<len(path):
+                s["pos"]=target
+            else:
+                st.session_state.running=False
+
+        else:
+            s["pos"]+=direction*move
+
+        robot=s["pos"]
+
+        time.sleep(0.03)
+        st.rerun()
 
 # ---------------------------------------------------------
 # PHYSICS
@@ -302,11 +320,9 @@ slip=False
 
 if robot is not None:
 
-    rx=int(robot[0])
-    ry=int(robot[1])
+    rx,ry=int(robot[0]),int(robot[1])
 
     mu=st.session_state.friction[rx,ry]
-
     v=st.session_state.robot_state["speed"]
 
     brake=v**2/(2*mu*g)
@@ -332,10 +348,12 @@ if path:
     xs=[p[0] for p in path]
     ys=[p[1] for p in path]
 
+    zs=[z[int(x),int(y)]+0.4 for x,y in zip(xs,ys)]
+
     fig.add_trace(go.Scatter3d(
         x=xs,
         y=ys,
-        z=z[xs,ys]+0.4,
+        z=zs,
         mode="lines",
         line=dict(color="yellow",width=6),
         name="Path"
@@ -398,22 +416,3 @@ if robot is not None:
     c1.metric("Speed",f"{v:.2f} m/s")
     c2.metric("Brake Distance",f"{brake:.2f} m")
     c3.metric("Slip Risk","YES" if slip else "NO")
-
-# ---------------------------------------------------------
-# HELP
-# ---------------------------------------------------------
-
-st.info(
-"""
-Workflow
-
-1. Paint terrain elevation
-2. Paint friction surfaces
-3. Add obstacles
-4. Place ⭐ Start
-5. Place ⭐ Goal
-6. Press Run Robot
-
-Robot will plan path and drive it using curvature physics.
-"""
-)
