@@ -14,16 +14,15 @@ st.title("🌍 World Auditor Robot Navigation Lab")
 # LOAD ROBOT CONFIG
 # ---------------------------------------------------------
 
-if "robot_config" not in st.session_state:
+robot_cfg = st.session_state.get("robot_config",{
+    "mass":800,
+    "max_speed":15,
+    "accel":4
+})
 
-    st.warning("⚠️ Please configure a robot in Robot Builder first")
-    st.stop()
-
-robot_cfg = st.session_state.get("robot_config", {})
-
-mass = robot_cfg.get("mass", 800)
-max_speed = robot_cfg.get("max_speed", 15)
-accel = robot_cfg.get("accel", 4)
+mass = robot_cfg["mass"]
+max_speed = robot_cfg["max_speed"]
+accel = robot_cfg["accel"]
 
 # ---------------------------------------------------------
 # CONSTANTS
@@ -33,9 +32,9 @@ GRID = 60
 WORLD_SIZE = 10
 CELL = WORLD_SIZE / GRID
 g = 9.81
-dt = 0.1
+dt = 0.08
 
-BACKGROUND="#202830"
+BACKGROUND = "#202830"
 
 SURFACES = {
 
@@ -60,15 +59,33 @@ with st.sidebar:
         ["Elevation","Friction","Obstacle","Start","Goal"]
     )
 
-    surface = st.selectbox("Surface",list(SURFACES.keys()))
+    surface = st.selectbox("Surface", list(SURFACES.keys()))
 
 brush_color = SURFACES[surface]["color"]
 
 # ---------------------------------------------------------
-# MAP STATE
+# LEGEND
+# ---------------------------------------------------------
+
+st.subheader("Surface Materials")
+
+cols = st.columns(len(SURFACES))
+
+for i,(name,data) in enumerate(SURFACES.items()):
+
+    cols[i].markdown(
+        f"<div style='background-color:{data['color']};height:12px'></div>",
+        unsafe_allow_html=True
+    )
+
+    cols[i].caption(f"{name} μ={data['mu']}")
+
+# ---------------------------------------------------------
+# MAP STORAGE
 # ---------------------------------------------------------
 
 def init(name,val):
+
     if name not in st.session_state:
         st.session_state[name]=val
 
@@ -83,6 +100,7 @@ init("goal",None)
 # ---------------------------------------------------------
 
 canvas = st_canvas(
+
 stroke_width=8,
 stroke_color=brush_color,
 background_color=BACKGROUND,
@@ -90,10 +108,11 @@ height=360,
 width=360,
 drawing_mode="freedraw",
 key="canvas"
+
 )
 
 # ---------------------------------------------------------
-# PROCESS DRAW
+# PROCESS DRAWING
 # ---------------------------------------------------------
 
 if canvas.json_data:
@@ -124,10 +143,10 @@ if canvas.json_data:
                 st.session_state.friction[x,y]=SURFACES[surface]["mu"]
 
             elif mode=="Elevation":
-                st.session_state.elevation[x,y]+=0.2
+                st.session_state.elevation[x,y]+=0.3
 
 # ---------------------------------------------------------
-# PATH PLANNER
+# A STAR
 # ---------------------------------------------------------
 
 def astar(grid,start,goal):
@@ -191,34 +210,53 @@ if st.session_state.start and st.session_state.goal:
     )
 
 # ---------------------------------------------------------
-# ROBOT SIMULATION
+# ROBOT STATE
 # ---------------------------------------------------------
 
 if "robot_state" not in st.session_state:
 
     st.session_state.robot_state={
-        "i":0,
+
+        "index":0,
         "pos":None,
-        "speed":0
+        "speed":0,
+        "distance":0,
+        "time":0
     }
 
-if st.button("🚀 Run Audit") and path:
+# ---------------------------------------------------------
+# RUN BUTTON
+# ---------------------------------------------------------
 
-    st.session_state.robot_state["i"]=0
-    st.session_state.robot_state["pos"]=np.array(path[0],dtype=float)
-    st.session_state.robot_state["speed"]=0
-    st.session_state.running=True
+if st.button("🚀 Run Audit"):
+
+    if not path:
+        st.error("Place start and goal points")
+
+    else:
+
+        st.session_state.robot_state["index"]=0
+        st.session_state.robot_state["pos"]=np.array(path[0],dtype=float)
+        st.session_state.robot_state["speed"]=0
+        st.session_state.robot_state["distance"]=0
+        st.session_state.robot_state["time"]=0
+
+        st.session_state.running=True
 
 if "running" not in st.session_state:
     st.session_state.running=False
 
 robot=None
 
+# ---------------------------------------------------------
+# ROBOT MOTION
+# ---------------------------------------------------------
+
 if st.session_state.running and path:
 
     s=st.session_state.robot_state
 
-    target=np.array(path[s["i"]])
+    target=np.array(path[s["index"]])
 
     direction=target-s["pos"]
 
@@ -229,13 +267,19 @@ if st.session_state.running and path:
 
     s["speed"]=min(s["speed"]+accel*dt,max_speed)
 
-    s["pos"]+=direction*s["speed"]*dt
+    move=s["speed"]*dt
 
-    if dist<0.3:
-        s["i"]+=1
+    s["pos"]+=direction*move
 
-    if s["i"]>=len(path):
-        st.session_state.running=False
+    s["distance"]+=move
+    s["time"]+=dt
+
+    if dist<0.4:
+
+        s["index"]+=1
+
+        if s["index"]>=len(path):
+            st.session_state.running=False
 
     robot=s["pos"]
 
@@ -243,64 +287,12 @@ if st.session_state.running and path:
     st.rerun()
 
 # ---------------------------------------------------------
-# 3D WORLD
+# PHYSICS
 # ---------------------------------------------------------
 
-z=st.session_state.elevation
-
-fig=go.Figure()
-
-fig.add_trace(go.Surface(
-z=z,
-colorscale="Viridis",
-showscale=False,
-name="Elevation"
-))
-
-if path:
-
-    xs=[p[0] for p in path]
-    ys=[p[1] for p in path]
-    zs=[z[int(x),int(y)]+0.3 for x,y in zip(xs,ys)]
-
-    fig.add_trace(go.Scatter3d(
-    x=xs,
-    y=ys,
-    z=zs,
-    mode="lines",
-    line=dict(color="yellow",width=6),
-    name="Path"
-    ))
-
-if robot is not None:
-
-    fig.add_trace(go.Scatter3d(
-    x=[robot[0]],
-    y=[robot[1]],
-    z=[z[int(robot[0]),int(robot[1])]+1],
-    mode="markers",
-    marker=dict(size=10,color="red"),
-    name="Robot"
-    ))
-
-fig.update_layout(
-
-scene=dict(
-xaxis_title="X Position (East-West)",
-yaxis_title="Y Position (North-South)",
-zaxis_title="Elevation (meters)"
-),
-
-template="plotly_dark",
-height=700,
-showlegend=True
-)
-
-st.plotly_chart(fig,use_container_width=True)
-
-# ---------------------------------------------------------
-# TELEMETRY
-# ---------------------------------------------------------
+brake=0
+slip=False
+mu=1
 
 if robot is not None:
 
@@ -314,28 +306,108 @@ if robot is not None:
 
     slip=v>np.sqrt(mu*g*5)
 
+# ---------------------------------------------------------
+# 3D VISUALIZATION
+# ---------------------------------------------------------
+
+z=st.session_state.elevation
+
+fig=go.Figure()
+
+fig.add_trace(go.Surface(
+
+z=z,
+colorscale="Viridis",
+showscale=True,
+name="Elevation"
+
+))
+
+# PATH
+
+if path:
+
+    xs=[p[0] for p in path]
+    ys=[p[1] for p in path]
+    zs=[z[int(x),int(y)]+0.2 for x,y in zip(xs,ys)]
+
+    fig.add_trace(go.Scatter3d(
+
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="lines",
+        line=dict(color="yellow",width=6),
+        name="Path"
+
+    ))
+
+# ROBOT
+
+if robot is not None:
+
+    fig.add_trace(go.Scatter3d(
+
+        x=[robot[0]],
+        y=[robot[1]],
+        z=[z[int(robot[0]),int(robot[1])]+1],
+        mode="markers",
+        marker=dict(size=12,color="red"),
+        name="Robot"
+
+    ))
+
+fig.update_layout(
+
+scene=dict(
+
+xaxis_title="X Position (East / West)",
+yaxis_title="Y Position (North / South)",
+zaxis_title="Elevation (m)"
+
+),
+
+template="plotly_dark",
+height=700,
+showlegend=True
+)
+
+st.plotly_chart(fig,use_container_width=True)
+
+# ---------------------------------------------------------
+# TELEMETRY TABLE
+# ---------------------------------------------------------
+
+if robot is not None:
+
+    s=st.session_state.robot_state
+
     telemetry=pd.DataFrame({
 
     "Metric":[
     "Robot X",
     "Robot Y",
-    "Speed",
+    "Speed (m/s)",
     "Surface μ",
-    "Brake Distance",
-    "Slip Risk"
+    "Brake Distance (m)",
+    "Slip Risk",
+    "Distance Travelled (m)",
+    "Time Elapsed (s)"
     ],
 
     "Value":[
     round(robot[0],2),
     round(robot[1],2),
-    round(v,2),
+    round(s["speed"],2),
     round(mu,2),
     round(brake,2),
-    "YES" if slip else "NO"
+    "YES" if slip else "NO",
+    round(s["distance"],2),
+    round(s["time"],2)
     ]
 
     })
 
-    st.write("### Robot Telemetry")
+    st.subheader("Robot Telemetry")
 
     st.table(telemetry)
