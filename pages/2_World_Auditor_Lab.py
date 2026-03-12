@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from streamlit_drawable_canvas import st_canvas
 import heapq
 import time
+import pandas as pd
 
 st.set_page_config(layout="wide", page_title="World Auditor Lab")
 st.title("World Auditor Robot Navigation Lab")
@@ -47,10 +48,7 @@ with st.sidebar:
         ["Elevation","Friction","Obstacle","Start","Goal"]
     )
 
-    surface = st.selectbox(
-        "Surface",
-        list(SURFACES.keys())
-    )
+    surface = st.selectbox("Surface", list(SURFACES.keys()))
 
 brush_color = SURFACES[surface]["color"]
 
@@ -67,7 +65,7 @@ for i,(name,data) in enumerate(SURFACES.items()):
         f"<div style='background-color:{data['color']};height:10px;border-radius:5px'></div>",
         unsafe_allow_html=True
     )
-    cols[i].caption(f"{name} (μ:{data['mu']})")
+    cols[i].caption(f"{name} (μ={data['mu']})")
 
 # ---------------------------------------------------------
 # MAP STORAGE
@@ -137,7 +135,7 @@ if canvas.json_data:
                 st.session_state.elevation[x,y]+=0.2
 
 # ---------------------------------------------------------
-# A* PATH PLANNER
+# A* PATH
 # ---------------------------------------------------------
 
 def astar(grid,start,goal):
@@ -182,49 +180,9 @@ def astar(grid,start,goal):
 
                 cost[(nx,ny)]=new
                 came[(nx,ny)]=cur
-
                 heapq.heappush(open,(new+h((nx,ny),goal),(nx,ny)))
 
     return []
-
-# ---------------------------------------------------------
-# CURVATURE SPEED
-# ---------------------------------------------------------
-
-def curvature_speed(path,friction):
-
-    speeds=[]
-
-    for i in range(len(path)):
-
-        if i==0 or i==len(path)-1:
-            speeds.append(max_speed)
-            continue
-
-        x1,y1=path[i-1]
-        x2,y2=path[i]
-        x3,y3=path[i+1]
-
-        v1=np.array([x2-x1,y2-y1])
-        v2=np.array([x3-x2,y3-y2])
-
-        angle=np.arccos(
-            np.clip(
-                np.dot(v1,v2)/
-                (np.linalg.norm(v1)*np.linalg.norm(v2)+1e-6),
-                -1,1
-            )
-        )
-
-        radius=1/(angle+1e-3)
-
-        mu=friction[x2,y2]
-
-        vmax=np.sqrt(mu*g*radius)
-
-        speeds.append(min(vmax,max_speed))
-
-    return speeds
 
 # ---------------------------------------------------------
 # BUILD PATH
@@ -234,29 +192,18 @@ grid=st.session_state.obstacle
 path=[]
 
 if st.session_state.start and st.session_state.goal:
-
     path=astar(grid,st.session_state.start,st.session_state.goal)
-
-speed_profile=[]
-
-if path:
-    speed_profile=curvature_speed(path,st.session_state.friction)
 
 # ---------------------------------------------------------
 # ROBOT STATE
 # ---------------------------------------------------------
 
 if "robot_state" not in st.session_state:
-
     st.session_state.robot_state={
         "i":0,
         "pos":None,
         "speed":0
     }
-
-# ---------------------------------------------------------
-# RUN ROBOT
-# ---------------------------------------------------------
 
 if st.button("Run Robot") and path:
 
@@ -287,10 +234,7 @@ if st.session_state.running and path:
         if dist>0:
             direction/=dist
 
-        desired_speed=speed_profile[s["i"]]
-
-        s["speed"]+=accel*dt
-        s["speed"]=min(s["speed"],desired_speed)
+        s["speed"]=min(s["speed"]+accel*dt,max_speed)
 
         move=s["speed"]*dt
 
@@ -317,12 +261,14 @@ if st.session_state.running and path:
 
 brake=0
 slip=False
+mu=1
 
 if robot is not None:
 
     rx,ry=int(robot[0]),int(robot[1])
 
     mu=st.session_state.friction[rx,ry]
+
     v=st.session_state.robot_state["speed"]
 
     brake=v**2/(2*mu*g)
@@ -340,14 +286,14 @@ fig=go.Figure()
 fig.add_trace(go.Surface(
     z=z,
     colorscale="Viridis",
-    showscale=False
+    showscale=False,
+    name="Terrain Elevation"
 ))
 
 if path:
 
     xs=[p[0] for p in path]
     ys=[p[1] for p in path]
-
     zs=[z[int(x),int(y)]+0.4 for x,y in zip(xs,ys)]
 
     fig.add_trace(go.Scatter3d(
@@ -356,7 +302,7 @@ if path:
         z=zs,
         mode="lines",
         line=dict(color="yellow",width=6),
-        name="Path"
+        name="Planned Path"
     ))
 
 if robot is not None:
@@ -370,49 +316,51 @@ if robot is not None:
         name="Robot"
     ))
 
-if st.session_state.start:
-
-    x,y=st.session_state.start
-
-    fig.add_trace(go.Scatter3d(
-        x=[x],
-        y=[y],
-        z=[z[x,y]+1],
-        mode="markers",
-        marker=dict(size=12,color="lime",symbol="star"),
-        name="Start"
-    ))
-
-if st.session_state.goal:
-
-    x,y=st.session_state.goal
-
-    fig.add_trace(go.Scatter3d(
-        x=[x],
-        y=[y],
-        z=[z[x,y]+1],
-        mode="markers",
-        marker=dict(size=12,color="cyan",symbol="star"),
-        name="Goal"
-    ))
+# AXIS TITLES
 
 fig.update_layout(
+
+    scene=dict(
+
+        xaxis_title="X Position (East/West)",
+        yaxis_title="Y Position (North/South)",
+        zaxis_title="Elevation (meters)"
+    ),
+
     template="plotly_dark",
-    height=700
+    height=700,
+    showlegend=True
 )
 
 st.plotly_chart(fig,use_container_width=True)
 
 # ---------------------------------------------------------
-# TELEMETRY
+# TELEMETRY TABLE
 # ---------------------------------------------------------
 
 if robot is not None:
 
-    c1,c2,c3=st.columns(3)
+    telemetry = pd.DataFrame({
 
-    v=st.session_state.robot_state["speed"]
+        "Metric":[
+            "Robot X",
+            "Robot Y",
+            "Speed (m/s)",
+            "Surface Friction μ",
+            "Brake Distance (m)",
+            "Slip Risk"
+        ],
 
-    c1.metric("Speed",f"{v:.2f} m/s")
-    c2.metric("Brake Distance",f"{brake:.2f} m")
-    c3.metric("Slip Risk","YES" if slip else "NO")
+        "Value":[
+            round(robot[0],2),
+            round(robot[1],2),
+            round(st.session_state.robot_state["speed"],2),
+            round(mu,2),
+            round(brake,2),
+            "YES" if slip else "NO"
+        ]
+
+    })
+
+    st.write("### Robot Telemetry")
+    st.table(telemetry)
