@@ -260,34 +260,30 @@ robot=None
 # ROBOT MOTION
 # ---------------------------------------------------------
 
+# --- IMPROVED NAVIGATION & MOTION ---
 if st.session_state.running and path:
-
-    s=st.session_state.robot_state
-
-    target=np.array(path[s["index"]])
-
-    direction=target-s["pos"]
-
-    dist=np.linalg.norm(direction)
-
-    if dist>0:
-        direction/=dist
-
-    s["speed"]=min(s["speed"]+accel*dt,max_speed)
-
-    move=s["speed"]*dt
-
-    s["pos"]+=direction*move
-
-    s["distance"]+=move
-    s["time"]+=dt
-
-    if dist<0.4:
-
-        s["index"]+=1
-
-        if s["index"]>=len(path):
-            st.session_state.running=False
+    s = st.session_state.robot_state
+    
+    if s["i"] < len(path):
+        target_node = path[s["i"]]
+        # Snap the robot to the exact center of the path node to prevent drifting
+        s["pos"] = [float(target_node[0]), float(target_node[1])]
+        
+        # Calculate local physics at this specific node
+        mu = st.session_state.friction[int(target_node[0]), int(target_node[1])]
+        
+        # Smoothly increase speed toward the target's limit
+        limit = speed_profile[s["i"]]
+        if s["speed"] < limit:
+            s["speed"] = min(limit, s["speed"] + accel * dt)
+        else:
+            s["speed"] = max(limit, s["speed"] - (mu * g * dt)) # Engine braking
+            
+        s["i"] += 1
+        time.sleep(0.01) # Faster refresh for smoother movement
+        st.rerun()
+    else:
+        st.session_state.running = False
 
     robot=s["pos"]
 
@@ -386,36 +382,40 @@ st.plotly_chart(fig,use_container_width=True)
 # TELEMETRY TABLE
 # ---------------------------------------------------------
 
+# --- 7. LIVE TELEMETRY DASHBOARD ---
 if robot is not None:
+    st.divider()
+    t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+    
+    # Extract current state
+    curr_speed = st.session_state.robot_state["speed"]
+    rx, ry = int(robot[0]), int(robot[1])
+    curr_mu = st.session_state.friction[rx, ry]
+    
+    # Find material name from friction value
+    surface_name = "Unknown"
+    for name, data in SURFACES.items():
+        if np.isclose(data["mu"], curr_mu):
+            surface_name = name
 
-    s=st.session_state.robot_state
-
-    telemetry=pd.DataFrame({
-
-    "Metric":[
-    "Robot X",
-    "Robot Y",
-    "Speed (m/s)",
-    "Surface μ",
-    "Brake Distance (m)",
-    "Slip Risk",
-    "Distance Travelled (m)",
-    "Time Elapsed (s)"
-    ],
-
-    "Value":[
-    round(robot[0],2),
-    round(robot[1],2),
-    round(s["speed"],2),
-    round(mu,2),
-    round(brake,2),
-    "YES" if slip else "NO",
-    round(s["distance"],2),
-    round(s["time"],2)
-    ]
-
-    })
-
+    with t_col1:
+        st.metric("Speed", f"{curr_speed:.1f} m/s", delta=f"{accel} acc")
+    with t_col2:
+        st.metric("Surface", surface_name, delta=f"μ: {curr_mu}")
+    with t_col3:
+        # Calculate braking distance based on current speed and grip
+        brake_dist = (curr_speed**2) / (2 * curr_mu * g) if curr_mu > 0 else 0
+        st.metric("Braking Dist", f"{brake_dist:.1f} m")
+    with t_col4:
+        # Pull battery data from the Robot Builder page!
+        battery = robot_cfg.get("battery_capacity", 500)
+        st.metric("Battery Consum.", f"{(curr_speed * mass)/1000:.1f} Wh/s")
     st.subheader("Robot Telemetry")
 
-    st.table(telemetry)
+    # FIX: Define the 'telemetry' variable before calling st.table
+    telemetry = {
+        "Parameter": ["Current Speed", "Surface Friction (μ)", "Est. Braking Distance", "Energy Draw"],
+        "Value": [f"{curr_speed:.2f} m/s", f"{curr_mu:.2f}", f"{brake_dist:.2f} m", f"{(curr_speed * mass)/1000:.2f} Wh/s"]
+    }
+    
+    st.table(pd.DataFrame(telemetry))
