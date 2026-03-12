@@ -59,6 +59,7 @@ st.header("Battery")
 
 config["battery_capacity"] = st.slider("Battery Capacity (Wh)",100,2000,config["battery_capacity"])
 config["max_speed"] = st.slider("Max Speed (m/s)",1.0,20.0,config.get("max_speed",4.0))
+config["accel"] = st.slider("Acceleration (m/s²)", 1.0, 10.0, config.get("accel", 4.0))
 # ---------------------------------------------------------
 # SAVE
 # ---------------------------------------------------------
