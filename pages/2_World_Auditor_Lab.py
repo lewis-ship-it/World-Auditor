@@ -383,39 +383,50 @@ st.plotly_chart(fig,use_container_width=True)
 # ---------------------------------------------------------
 
 # --- 7. LIVE TELEMETRY DASHBOARD ---
+# --- 7. LIVE TELEMETRY DASHBOARD ---
 if robot is not None:
     st.divider()
     t_col1, t_col2, t_col3, t_col4 = st.columns(4)
     
-    # Extract current state
-    curr_speed = st.session_state.robot_state["speed"]
+    # 1. Access robot state with a safety fallback to prevent KeyError
+    s = st.session_state.get("robot_state", {"pos": st.session_state.start, "speed": 0.0, "i": 0})
+    curr_speed = s.get("speed", 0.0)
+    
     rx, ry = int(robot[0]), int(robot[1])
     curr_mu = st.session_state.friction[rx, ry]
     
-    # Find material name from friction value
+    # Identify surface
     surface_name = "Unknown"
     for name, data in SURFACES.items():
         if np.isclose(data["mu"], curr_mu):
             surface_name = name
 
+    # 2. Metric Cards
     with t_col1:
-        st.metric("Speed", f"{curr_speed:.1f} m/s", delta=f"{accel} acc")
+        st.metric("Speed", f"{curr_speed:.1f} m/s")
     with t_col2:
         st.metric("Surface", surface_name, delta=f"μ: {curr_mu}")
     with t_col3:
-        # Calculate braking distance based on current speed and grip
         brake_dist = (curr_speed**2) / (2 * curr_mu * g) if curr_mu > 0 else 0
         st.metric("Braking Dist", f"{brake_dist:.1f} m")
     with t_col4:
-        # Pull battery data from the Robot Builder page!
-        battery = robot_cfg.get("battery_capacity", 500)
-        st.metric("Battery Consum.", f"{(curr_speed * mass)/1000:.1f} Wh/s")
+        # Pulling data from 0_robot_builder.py
+        capacity = robot_cfg.get("battery_capacity", 0)
+        st.metric("Battery Cap.", f"{capacity} Wh")
+
     st.subheader("Robot Telemetry")
 
-    # FIX: Define the 'telemetry' variable before calling st.table
-    telemetry = {
-        "Parameter": ["Current Speed", "Surface Friction (μ)", "Est. Braking Distance", "Energy Draw"],
-        "Value": [f"{curr_speed:.2f} m/s", f"{curr_mu:.2f}", f"{brake_dist:.2f} m", f"{(curr_speed * mass)/1000:.2f} Wh/s"]
+    # 3. FIX: Properly define the 'telemetry' variable for the table
+    # This includes the Torque and RPM from your builder page
+    telemetry_data = {
+        "Attribute": ["Motor Torque", "Max RPM", "Current Speed", "Braking Distance", "Grip Coefficient"],
+        "Value": [
+            f"{robot_cfg.get('motor_torque', 0)} Nm",
+            f"{robot_cfg.get('max_rpm', 0)} RPM",
+            f"{curr_speed:.2f} m/s",
+            f"{brake_dist:.2f} m",
+            f"{curr_mu:.2f} μ"
+        ]
     }
     
-    st.table(pd.DataFrame(telemetry))
+    st.table(pd.DataFrame(telemetry_data))
