@@ -14,12 +14,20 @@ st.title("🌍 World Auditor Robot Navigation Lab")
 # LOAD ROBOT CONFIG
 # ---------------------------------------------------------
 
-robot_cfg = st.session_state.get("robot_config",{
-    "mass":800,
-    "max_speed":15,
-    "accel":4
-})
+# ---------------------------------------------------------
+# REQUIRE ROBOT BUILDER
+# ---------------------------------------------------------
 
+if "robot_config" not in st.session_state:
+
+    st.error("⚠ Robot not configured. Go to 'Robot Builder' page first.")
+    st.stop()
+
+robot_cfg = st.session_state.robot_config
+
+mass = robot_cfg.get("mass",800)
+max_speed = robot_cfg.get("max_speed",15)
+accel = robot_cfg.get("accel",4)
 mass = robot_cfg["mass"]
 max_speed = robot_cfg["max_speed"]
 accel = robot_cfg["accel"]
