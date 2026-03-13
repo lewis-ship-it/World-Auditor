@@ -44,27 +44,31 @@ g = 9.81
 # ---------------------------------------------------------
 # MAP SERVER
 # ---------------------------------------------------------
-
 def generate_world():
+    # Standardizing names to avoid NameError
     elevation = np.zeros((GRID, GRID))
     friction = np.ones((GRID, GRID))
     obstacle = np.zeros((GRID, GRID))
 
-    # --- TEST 1: THE TORQUE CLIMB (X: 0 to 25) ---
-    # A steady incline to see if your Motor Torque can handle the Mass
+    # --- PRESET 1: THE TORQUE CLIMB ---
+    # Elevation rises to test motor torque vs mass
     for x in range(0, 25):
         elevation[x, :] = (x / 4) 
 
-    # --- TEST 2: THE ICE PATCH (X: 40 to 60) ---
-    # Low friction zone to test if the robot slides or loses traction
-    friction[40:60, 20:80] = 0.1 
+    # --- PRESET 2: THE TIRE TEST ZONES ---
+    # Mud Zone (Medium Grip)
+    friction[35:50, :] = 0.4 
+    # Ice Zone (Low Grip)
+    friction[60:75, :] = 0.1 
 
-    # --- TEST 3: THE CHICANE (Obstacles) ---
-    # A wall with a narrow gap to test A* pathfinding and inflation radius
-    obstacle[70, 0:45] = 1
-    obstacle[70, 55:100] = 1
+    # --- PRESET 3: NAVIGATION WALL ---
+    obstacle[85, 0:40] = 1
+    obstacle[85, 60:100] = 1
 
     return elevation, friction, obstacle
+
+# Ensure these match the return statement exactly
+elevation, friction, obstacle = generate_world()
 
 # ---------------------------------------------------------
 # COSTMAP (ROS style)
@@ -213,6 +217,7 @@ if run and path:
         slip = v > np.sqrt(mu*g*5)
         # Calculate how much torque is actually being used vs what is available
         # motor_force = torque / wheel_radius
+        max_power = (torque * max_rpm) / 9.5488
         effort = (power_draw / (torque * max_rpm / 9.5488)) * 100
         efforts.append(min(effort, 100))  # Ensure it doesn't exceed 100%
 
