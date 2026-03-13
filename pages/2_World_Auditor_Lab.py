@@ -191,51 +191,69 @@ time_elapsed=0
 # ---------------------------------------------------------
 
 if run and path:
+    # Initialize tracking lists before the loop starts
+    positions, speeds, times, frictions, headings, efforts = [], [], [], [], [], []
+    x, y = path[0]  # Start at the first waypoint
+    theta, speed, distance, time_elapsed = 0.0, 0.0, 0.0, 0.0
 
     for wp in path:
-
-        wx,wy = wp
-
-        dx = wx-x
-        dy = wy-y
-
-        target_heading = np.arctan2(dy,dx)
-
+        wx, wy = wp
+        dx, dy = wx - x, wy - y
+        
+        target_heading = np.arctan2(dy, dx)
         heading_error = target_heading - theta
-
-        omega = heading_error
-
-        v = min(speed + accel*dt, max_speed)
-
-        theta += omega*dt
-
-        x += v*np.cos(theta)*dt
-        y += v*np.sin(theta)*dt
-
+        omega = heading_error # Simple P-controller for steering
+        
+        # 1. Physics-based Velocity
+        v = min(speed + accel * dt, max_speed)
+        
+        # 2. Update Position
+        theta += omega * dt
+        x += v * np.cos(theta) * dt
+        y += v * np.sin(theta) * dt
         speed = v
-
-        rx,ry=int(x),int(y)
-
-        mu = friction[rx,ry]
-
-        brake = v**2/(2*mu*g)
-
-        slip = v > np.sqrt(mu*g*5)
-        # Calculate how much torque is actually being used vs what is available
-        # motor_force = torque / wheel_radius
-        max_power = (torque * max_rpm) / 9.5488
-        effort = (power_draw / (torque * max_rpm / 9.5488)) * 100
-        efforts.append(min(effort, 100))  # Ensure it doesn't exceed 100%
-
-        distance += v*dt
+        
+        # 3. Environment Sampling
+        rx, ry = int(np.clip(x, 0, GRID-1)), int(np.clip(y, 0, GRID-1))
+        mu = friction[rx, ry]
+        
+        # Calculate Slope (for Torque/Power Audit)
+        # We look at the elevation change to see if we are climbing
+        slope_grad = np.gradient(elevation)
+        curr_slope = slope_grad[0][rx, ry] 
+        
+        # 4. POWER & EFFORT CALCULATION (The Fix)
+        # Force_total = Force_accel + Force_gravity + Force_friction
+        f_accel = mass * accel
+        f_gravity = mass * g * np.sin(np.arctan(curr_slope))
+        f_friction = mass * g * mu * 0.01 # Rolling resistance
+        
+        total_force_required = f_accel + f_gravity + f_friction
+        
+        # Power (Watts) = Force (N) * Velocity (m/s)
+        power_draw = abs(total_force_required * v)
+        
+        # Max Power = (Torque * RPM) / 9.5488
+        max_motor_power = (torque * max_rpm) / 9.5488
+        
+        # Calculate Effort %
+        if max_motor_power > 0:
+            current_effort = (power_draw / max_motor_power) * 100
+        else:
+            current_effort = 0
+            
+        # 5. DATA LOGGING
+        efforts.append(min(current_effort, 100)) # Clamp to 100%
+        distance += v * dt
         time_elapsed += dt
-
-        positions.append((x,y))
+        
+        positions.append((x, y))
         speeds.append(v)
         times.append(time_elapsed)
         frictions.append(mu)
         headings.append(theta)
 
+        
         # ------------------------------------
         # RVIZ STYLE MAP
         # ------------------------------------
@@ -316,12 +334,25 @@ if positions:
     st.plotly_chart(speed_fig, use_container_width=True)
 
     # --- NEW: CONTROL EFFORT GRAPH ---
+    # --- 3. CONTROL EFFORT GRAPH (Telemetry Section) ---
+if efforts:
     effort_fig = go.Figure()
-    effort_fig.add_trace(go.Scatter(x=times, y=efforts, mode="lines", 
-                                    line=dict(color="#ffea00", width=3),
-                                    fill='tozeroy', fillcolor='rgba(255, 234, 0, 0.1)'))
-    effort_fig.update_layout(template="plotly_dark", title="Control Effort (% Motor Load)", 
-                             yaxis=dict(range=[0, 110]), height=300)
+    effort_fig.add_trace(go.Scatter(
+        x=times, 
+        y=efforts, 
+        mode="lines", 
+        line=dict(color="#ffea00", width=3, shape='spline'),
+        fill='tozeroy', 
+        fillcolor='rgba(255, 234, 0, 0.1)'
+    ))
+
+    effort_fig.update_layout(
+        template="plotly_dark", 
+        title="Motor Control Effort (% Load)", 
+        xaxis_title="Time (s)",
+        yaxis=dict(title="Usage %", range=[0, 110]), 
+        height=300
+    )
     st.plotly_chart(effort_fig, use_container_width=True)
 
     # --- HEADING GRAPH ---
