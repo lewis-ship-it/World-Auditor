@@ -31,6 +31,7 @@ wheel_r = robot_cfg.get("wheel_radius", 0.25)
 
 # BRAINPOWER: Calculate acceleration based on Torque instead of a slider
 # Force = Torque / Radius | Acceleration = Force / Mass
+max_speed = robot_cfg.get("max_speed", 15.0)
 accel = (torque / wheel_r) / mass
 
 # ---------------------------------------------------
