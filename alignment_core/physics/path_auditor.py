@@ -18,7 +18,11 @@ class PathAuditor:
         # how fast we could have been going to reach that point safely.
         v_safe = np.zeros_like(dist_array)
         v_safe[dist_array >= target_stop_dist] = 0
-        
+        # Calculate how much torque is actually being used vs what is available
+        # motor_force = torque / wheel_radius
+        effort = (power_draw / (torque * max_rpm / 9.5488)) * 100
+        efforts.append(min(effort, 100))  # Ensure it doesn't exceed 100%
+
         for i in range(len(dist_array) - 2, -1, -1):
             theta = slopes[i]
             mu = friction_array[i]

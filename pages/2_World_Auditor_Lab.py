@@ -46,23 +46,25 @@ g = 9.81
 # ---------------------------------------------------------
 
 def generate_world():
+    elevation = np.zeros((GRID, GRID))
+    friction = np.ones((GRID, GRID))
+    obstacle = np.zeros((GRID, GRID))
 
-    elevation = np.zeros((GRID,GRID))
-    friction = np.ones((GRID,GRID))
-    obstacle = np.zeros((GRID,GRID))
+    # --- TEST 1: THE TORQUE CLIMB (X: 0 to 25) ---
+    # A steady incline to see if your Motor Torque can handle the Mass
+    for x in range(0, 25):
+        elevation[x, :] = (x / 4) 
 
-    for x in range(GRID):
-        for y in range(GRID):
-            elevation[x,y] = 2*np.sin(x/12)+np.cos(y/10)
+    # --- TEST 2: THE ICE PATCH (X: 40 to 60) ---
+    # Low friction zone to test if the robot slides or loses traction
+    friction[40:60, 20:80] = 0.1 
 
-    obstacle[40:80,50] = 1
-    obstacle[20:60,30] = 1
-
-    friction[10:40,60:90] = 0.3
+    # --- TEST 3: THE CHICANE (Obstacles) ---
+    # A wall with a narrow gap to test A* pathfinding and inflation radius
+    obstacle[70, 0:45] = 1
+    obstacle[70, 55:100] = 1
 
     return elevation, friction, obstacle
-
-elevation, friction, obstacle = generate_world()
 
 # ---------------------------------------------------------
 # COSTMAP (ROS style)
@@ -209,6 +211,10 @@ if run and path:
         brake = v**2/(2*mu*g)
 
         slip = v > np.sqrt(mu*g*5)
+        # Calculate how much torque is actually being used vs what is available
+        # motor_force = torque / wheel_radius
+        effort = (power_draw / (torque * max_rpm / 9.5488)) * 100
+        efforts.append(min(effort, 100))  # Ensure it doesn't exceed 100%
 
         distance += v*dt
         time_elapsed += dt
@@ -272,60 +278,43 @@ if run and path:
 
         time.sleep(0.03)
 
+
 # ---------------------------------------------------------
 # TELEMETRY
 # ---------------------------------------------------------
 
 if positions:
-
+    # Get specs for calculation
+    robot_data = st.session_state.get("robot_config", {})
+    tq = robot_data.get("motor_torque", 120)
+    
     telemetry = pd.DataFrame({
-
-        "Metric":[
-            "Total Time",
-            "Distance",
-            "Max Speed",
-            "Robot Mass",
-            "Track Width"
-        ],
-
-        "Value":[
-            round(time_elapsed,2),
-            round(distance,2),
-            max(speeds),
-            mass,
-            track_width
-        ]
+        "Metric":["Total Time", "Distance", "Max Speed", "Motor Torque", "Battery Capacity"],
+        "Value":[f"{time_elapsed:.2f} s", f"{distance:.2f} m", f"{max(speeds):.2f} m/s", f"{tq} Nm", f"{battery_cap} Wh"]
     })
 
     telemetry_col.subheader("Telemetry")
     telemetry_col.table(telemetry)
 
+    # --- SPEED GRAPH ---
     speed_fig = go.Figure()
+    speed_fig.add_trace(go.Scatter(x=times, y=speeds, mode="lines", 
+                                   line=dict(color="#00e5ff", width=3, shape='spline'),
+                                   fill='tozeroy', fillcolor='rgba(0, 229, 255, 0.1)'))
+    speed_fig.update_layout(template="plotly_dark", title="Velocity Profile (m/s)", height=300)
+    st.plotly_chart(speed_fig, use_container_width=True)
 
-    speed_fig.add_trace(go.Scatter(
-        x=times,
-        y=speeds,
-        mode="lines"
-    ))
+    # --- NEW: CONTROL EFFORT GRAPH ---
+    effort_fig = go.Figure()
+    effort_fig.add_trace(go.Scatter(x=times, y=efforts, mode="lines", 
+                                    line=dict(color="#ffea00", width=3),
+                                    fill='tozeroy', fillcolor='rgba(255, 234, 0, 0.1)'))
+    effort_fig.update_layout(template="plotly_dark", title="Control Effort (% Motor Load)", 
+                             yaxis=dict(range=[0, 110]), height=300)
+    st.plotly_chart(effort_fig, use_container_width=True)
 
-    speed_fig.update_layout(
-        template="plotly_dark",
-        title="Speed vs Time"
-    )
-
-    st.plotly_chart(speed_fig,use_container_width=True)
-
+    # --- HEADING GRAPH ---
     heading_fig = go.Figure()
-
-    heading_fig.add_trace(go.Scatter(
-        x=times,
-        y=headings,
-        mode="lines"
-    ))
-
-    heading_fig.update_layout(
-        template="plotly_dark",
-        title="Heading vs Time"
-    )
-
-    st.plotly_chart(heading_fig,use_container_width=True)
+    heading_fig.add_trace(go.Scatter(x=times, y=headings, mode="lines", line=dict(color="#ff007f", width=3)))
+    heading_fig.update_layout(template="plotly_dark", title="Heading (Theta)", height=300)
+    st.plotly_chart(heading_fig, use_container_width=True)
