@@ -14,24 +14,30 @@ st.title("🤖 World Auditor Navigation Simulator")
 # ---------------------------------------------------------
 
 if "robot" not in st.session_state:
-
     st.warning("No robot found — loading default robot")
-
     st.session_state.robot = {
-        "mass":500,
-        "accel":3,
-        "max_speed":10,
-        "track_width":0.6,
-        "wheel_radius":0.25
+        "mass": 500,
+        "motor_torque": 120,   # Added to default
+        "max_rpm": 3000,       # Added to default
+        "battery_capacity": 500, # Added to default
+        "max_speed": 10,
+        "track_width": 0.6,
+        "wheel_radius": 0.25
     }
 
 robot = st.session_state.robot
 
-mass = robot["mass"]
-accel = robot["accel"]
-max_speed = robot["max_speed"]
-track_width = robot["track_width"]
-wheel_radius = robot["wheel_radius"]
+# Use .get("key", default_value) to prevent crashes
+mass = robot.get("mass", 500)
+torque = robot.get("motor_torque", 120) 
+max_rpm = robot.get("max_rpm", 3000)
+battery_cap = robot.get("battery_capacity", 500)
+max_speed = robot.get("max_speed", 10.0)
+track_width = robot.get("track_width", 0.6)
+wheel_radius = robot.get("wheel_radius", 0.25)
+
+# Calculate physics-based accel
+accel = (torque / wheel_radius) / mass
 
 # ---------------------------------------------------------
 # CONSTANTS
