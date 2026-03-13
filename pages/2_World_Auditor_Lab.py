@@ -146,6 +146,13 @@ map_col,telemetry_col = st.columns([3,1])
 placeholder = map_col.empty()
 
 run = st.button("Start Navigation")
+# --- UPDATE YOUR START BUTTON ---
+if st.button("▶️ Start Navigation"):
+    st.session_state.running = True
+    st.session_state.robot_state = {"pos": st.session_state.start, "speed": 0.0, "i": 0}
+    
+    # FIX: Initialize the battery energy using the builder's capacity
+    st.session_state.remaining_energy = robot_cfg.get("battery_capacity", 500)
 
 # ---------------------------------------------------
 # LOCAL PLANNER + CONTROLLER
