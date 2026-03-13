@@ -145,9 +145,17 @@ time_elapsed=0
 map_col,telemetry_col = st.columns([3,1])
 placeholder = map_col.empty()
 
-run = st.button("Start Navigation")
 # --- UPDATE YOUR START BUTTON ---
 if st.button("▶️ Start Navigation"):
+    if "start" not in st.session_state:
+        st.session_state.start = (0, 0)
+        
+    st.session_state.running = True
+    st.session_state.robot_state = {
+        "pos": st.session_state.start, 
+        "speed": 0.0, 
+        "i": 0
+}
     st.session_state.running = True
     st.session_state.robot_state = {"pos": st.session_state.start, "speed": 0.0, "i": 0}
     
