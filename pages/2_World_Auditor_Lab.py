@@ -282,50 +282,60 @@ if positions:
 
         "Metric":[
             "Total Time",
-            "Distance",
-            "Max Speed",
+            "Distance Travelled",
+            "Max Speed achieved",
             "Robot Mass",
-            "Track Width"
+            "Motor Torque",
+            "Max RPM",
+            "Battery Capacity"
         ],
 
         "Value":[
-            round(time_elapsed,2),
-            round(distance,2),
-            max(speeds),
-            mass,
-            track_width
+            f"{time_elapsed:.2f} s",
+            f"{distance:.2f} m",
+            f"{max(speeds):.2f} m/s",
+            f"{mass} kg",
+            f"{torque} Nm",
+            f"{max_rpm} RPM",
+            f"{battery_cap} Wh"
         ]
     })
 
     telemetry_col.subheader("Telemetry")
     telemetry_col.table(telemetry)
 
+    # Speed Chart
     speed_fig = go.Figure()
-
     speed_fig.add_trace(go.Scatter(
         x=times,
         y=speeds,
-        mode="lines"
+        mode="lines",
+        line=dict(color="#00CC96")
     ))
 
     speed_fig.update_layout(
         template="plotly_dark",
-        title="Speed vs Time"
+        title="Speed vs Time",
+        xaxis_title="Time (s)",
+        yaxis_title="Velocity (m/s)"
     )
 
-    st.plotly_chart(speed_fig,use_container_width=True)
+    st.plotly_chart(speed_fig, use_container_width=True)
 
+    # Heading Chart
     heading_fig = go.Figure()
-
     heading_fig.add_trace(go.Scatter(
         x=times,
         y=headings,
-        mode="lines"
+        mode="lines",
+        line=dict(color="#AB63FA")
     ))
 
     heading_fig.update_layout(
         template="plotly_dark",
-        title="Heading vs Time"
+        title="Heading vs Time",
+        xaxis_title="Time (s)",
+        yaxis_title="Heading (rad)"
     )
 
-    st.plotly_chart(heading_fig,use_container_width=True)
+    st.plotly_chart(heading_fig, use_container_width=True)
