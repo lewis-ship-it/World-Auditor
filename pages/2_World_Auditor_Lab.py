@@ -276,10 +276,19 @@ if run and path:
 # TELEMETRY
 # ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# TELEMETRY
+# ---------------------------------------------------------
+
 if positions:
+    # Safety Check: Pull from session_state or use a placeholder if missing
+    # This prevents the NameError you just saw
+    robot_data = st.session_state.get("robot_config", {})
+    tq = robot_data.get("motor_torque", "N/A")
+    rpm = robot_data.get("max_rpm", "N/A")
+    bat = robot_data.get("battery_capacity", "N/A")
 
     telemetry = pd.DataFrame({
-
         "Metric":[
             "Total Time",
             "Distance Travelled",
@@ -289,15 +298,14 @@ if positions:
             "Max RPM",
             "Battery Capacity"
         ],
-
         "Value":[
             f"{time_elapsed:.2f} s",
             f"{distance:.2f} m",
             f"{max(speeds):.2f} m/s",
             f"{mass} kg",
-            f"{torque} Nm",
-            f"{max_rpm} RPM",
-            f"{battery_cap} Wh"
+            f"{tq} Nm",
+            f"{rpm} RPM",
+            f"{bat} Wh"
         ]
     })
 
@@ -312,14 +320,12 @@ if positions:
         mode="lines",
         line=dict(color="#00CC96")
     ))
-
     speed_fig.update_layout(
         template="plotly_dark",
         title="Speed vs Time",
         xaxis_title="Time (s)",
         yaxis_title="Velocity (m/s)"
     )
-
     st.plotly_chart(speed_fig, use_container_width=True)
 
     # Heading Chart
@@ -330,12 +336,10 @@ if positions:
         mode="lines",
         line=dict(color="#AB63FA")
     ))
-
     heading_fig.update_layout(
         template="plotly_dark",
         title="Heading vs Time",
         xaxis_title="Time (s)",
         yaxis_title="Heading (rad)"
     )
-
     st.plotly_chart(heading_fig, use_container_width=True)
