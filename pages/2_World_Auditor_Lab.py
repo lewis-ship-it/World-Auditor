@@ -312,58 +312,55 @@ if run and path:
 # TELEMETRY
 # ---------------------------------------------------------
 
-# ---------------------------------------------------------
-# REDESIGNED TELEMETRY AUDIT
-# ---------------------------------------------------------
 
 if positions:
     st.divider()
     
-    # 1. SUMMARY TABLE
-    # Pulling correct specs for the final audit report
+    # 1. DATA PREPARATION & SUMMARY TABLE
+    # Standardizing data retrieval from session state
     robot_data = st.session_state.get("robot_config", st.session_state.get("robot", {}))
     tq = robot_data.get("motor_torque", 120)
     rpm = robot_data.get("max_rpm", 3000)
     bc = robot_data.get("battery_capacity", 500)
 
     telemetry_summary = pd.DataFrame({
-        "Metric": ["Total Time", "Distance", "Max Speed", "Motor Torque", "Battery Capacity"],
+        "Metric": ["Motor Torque", "Max RPM", "Battery Capacity", "Total Distance", "Max Speed"],
         "Value": [
-            f"{time_elapsed:.2f} s", 
-            f"{distance:.2f} m", 
-            f"{max(speeds):.2f} m/s", 
             f"{tq} Nm", 
-            f"{bc} Wh"
+            f"{rpm} RPM", 
+            f"{bc} Wh", 
+            f"{distance:.2f} m", 
+            f"{max(speeds):.2f} m/s"
         ]
     })
-
-    telemetry_col.subheader("📊 Audit Results")
+    
+    telemetry_col.subheader("📊 Performance Audit Results")
     telemetry_col.table(telemetry_summary)
 
     # 2. VELOCITY PROFILE (Neon Cyan)
-    # Shows acceleration curves and top-speed plateaus
     speed_fig = go.Figure()
     speed_fig.add_trace(go.Scatter(
         x=times, y=speeds, mode="lines", 
         line=dict(color="#00e5ff", width=3, shape='spline'),
         fill='tozeroy', fillcolor='rgba(0, 229, 255, 0.1)',
-        name="Velocity"
+        name="Velocity",
+        hovertemplate="<b>Time</b>: %{x}s<br><b>Speed</b>: %{y:.2f} m/s<br><i>Def: Linear velocity of the robot.</i><extra></extra>"
     ))
     speed_fig.update_layout(
-        template="plotly_dark", title="V-ACTUAL (Velocity m/s)", 
+        template="plotly_dark", title="V-ACTUAL (Velocity Profile)", 
         height=280, margin=dict(l=20, r=20, t=40, b=20)
     )
     st.plotly_chart(speed_fig, use_container_width=True)
 
     # 3. CONTROL EFFORT (Neon Yellow)
-    # Matches the math from your simulation loop
     if efforts:
         effort_fig = go.Figure()
         effort_fig.add_trace(go.Scatter(
             x=times, y=efforts, mode="lines", 
             line=dict(color="#ffea00", width=3, shape='spline'),
             fill='tozeroy', fillcolor='rgba(255, 234, 0, 0.1)',
-            name="Load %"
+            name="Load",
+            hovertemplate="<b>Time</b>: %{x}s<br><b>Load</b>: %{y:.1f}%<br><i>Def: % of motor capacity used.</i><extra></extra>"
         ))
         effort_fig.update_layout(
             template="plotly_dark", title="MOTOR LOAD (% Effort)", 
@@ -373,13 +370,13 @@ if positions:
         st.plotly_chart(effort_fig, use_container_width=True)
 
     # 4. GRIP & TRACTION AUDIT (Neon Green)
-    # New graph to show exactly when tires are on Ice vs Concrete
     if frictions:
         grip_fig = go.Figure()
         grip_fig.add_trace(go.Scatter(
             x=times, y=frictions, mode="lines", 
             line=dict(color="#00ff88", width=3, dash='dash'),
-            name="Mu (Friction)"
+            name="Friction",
+            hovertemplate="<b>Time</b>: %{x}s<br><b>Mu</b>: %{y}<br><i>Def: Traction coefficient (1.0=Max Grip).</i><extra></extra>"
         ))
         grip_fig.update_layout(
             template="plotly_dark", title="TIRE TRACTION (Coefficient of Friction)", 
@@ -393,10 +390,21 @@ if positions:
     heading_fig.add_trace(go.Scatter(
         x=times, y=headings, mode="lines", 
         line=dict(color="#ff007f", width=3),
-        name="Theta"
+        name="Theta",
+        hovertemplate="<b>Time</b>: %{x}s<br><b>Yaw</b>: %{y:.2f} rad<br><i>Def: Angular orientation.</i><extra></extra>"
     ))
     heading_fig.update_layout(
         template="plotly_dark", title="YAW ORIENTATION (Radians)", 
         height=280, margin=dict(l=20, r=20, t=40, b=20)
     )
     st.plotly_chart(heading_fig, use_container_width=True)
+
+    # 6. DATA GLOSSARY
+    with st.expander("📚 Engineering Definitions"):
+        st.markdown("""
+        **How to read these charts:**
+        - **Velocity (m/s)**: Shows acceleration performance. Steep curves mean high torque-to-weight ratio.
+        - **Control Effort (%)**: Shows motor stress. Spikes indicate high inclines (gravity) or surface resistance. 100% means the motor is at its physical limit.
+        - **Traction (Mu)**: Higher is better. When Mu drops (e.g., 0.1 for Ice), look at the Velocity chart to see if the robot slows down or slides.
+        - **Yaw (Theta)**: Tracks steering stability. Jittery lines here suggest the steering PID is over-correcting.
+        """)
