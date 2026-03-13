@@ -13,18 +13,25 @@ st.title("🤖 Mini ROS Navigation Simulator")
 # LOAD ROBOT
 # ---------------------------------------------------
 
-robot_cfg = st.session_state.get("robot")
+# --- UPDATE THIS AT THE TOP OF 2_World_Auditor_Lab.py ---
 
-if robot_cfg is None:
-    st.error("Build a robot first in Robot Builder.")
+if "robot_config" not in st.session_state:
+    st.error("⚠️ Robot not found! Please save your robot in 'Robot Builder' first.")
     st.stop()
 
-mass = robot_cfg["mass"]
-max_speed = robot_cfg["max_speed"]
-accel = robot_cfg["accel"]
-track_width = robot_cfg["track_width"]
+# Link to the shared configuration
+robot_cfg = st.session_state.robot_config
 
-wheel_radius = robot_cfg.get("wheel_radius",0.25)
+# Extract the specific values you want to use
+mass = robot_cfg.get("mass", 800)
+torque = robot_cfg.get("motor_torque", 120)
+max_rpm = robot_cfg.get("max_rpm", 3000)
+battery_cap = robot_cfg.get("battery_capacity", 500)
+wheel_r = robot_cfg.get("wheel_radius", 0.25)
+
+# BRAINPOWER: Calculate acceleration based on Torque instead of a slider
+# Force = Torque / Radius | Acceleration = Force / Mass
+accel = (torque / wheel_r) / mass
 
 # ---------------------------------------------------
 # CONSTANTS
@@ -39,21 +46,22 @@ g = 9.81
 # ---------------------------------------------------
 
 def generate_world():
+    elevation = np.zeros((GRID, GRID))
+    friction = np.ones((GRID, GRID))
+    obstacles = np.zeros((GRID, GRID))
 
-    elevation = np.zeros((GRID,GRID))
-    friction = np.ones((GRID,GRID))
-    obstacles = np.zeros((GRID,GRID))
+    # 🏔️ THE CLIMB: Steep hill at the start to test Torque/Mass
+    for x in range(0, 20):
+        elevation[x, :] = (x / 5) ** 2 
 
-    for x in range(GRID):
-        for y in range(GRID):
-            elevation[x,y] = 2*np.sin(x/10)+np.cos(y/8)
+    # 🧊 THE ICE TRAP: Low friction zone in the middle
+    friction[30:50, 30:50] = 0.05 
 
-    obstacles[30:70,40] = 1
-    obstacles[50,10:60] = 1
+    # 🚧 THE MAZE: Static obstacles to test A* and turning radius
+    obstacles[25:55, 20] = 1
+    obstacles[25:55, 40] = 1
 
-    friction[20:40,20:50] = 0.3
-
-    return elevation,friction,obstacles
+    return elevation, friction, obstacles
 
 elevation,friction,obstacles = generate_world()
 
@@ -159,6 +167,20 @@ if run and path:
 
         v = min(speed+accel*dt,max_speed)
 
+        # Calculate Slope Angle
+        slope_grad = np.gradient(elevation)
+        # Using the robot's current integer position for lookup
+        curr_slope = slope_grad[0][int(x), int(y)] 
+
+        # Power consumption logic: P = (Gravity + Friction) * Velocity
+        gravity_force = mass * g * np.sin(np.arctan(curr_slope))
+        friction_force = mass * g * friction[int(x), int(y)]
+        power_draw = (gravity_force + friction_force) * v
+
+        # Update Battery in Session State
+        # (Make sure to initialize st.session_state.remaining_energy in the Builder)
+        st.session_state.remaining_energy -= (power_draw * dt) / 3600 # Wh
+
         # differential wheel speeds
         w_r = (2*v + omega*track_width)/(2*wheel_radius)
         w_l = (2*v - omega*track_width)/(2*wheel_radius)
@@ -238,61 +260,34 @@ if run and path:
 # TELEMETRY
 # ---------------------------------------------------
 
-if positions:
+if "robot_state" in st.session_state:
+    st.divider()
+    t_col1, t_col2, t_col3 = st.columns(3)
+    
+    # Get current live data from the simulation
+    s = st.session_state.robot_state
+    v = s.get("speed", 0.0)
+    
+    with t_col1:
+        st.metric("Live Speed", f"{v:.2f} m/s", delta=f"{accel:.2f} m/s²")
+    with t_col2:
+        # Calculate power draw: (Force * Velocity) / Efficiency
+        pwr = (v * mass) / 1000 
+        st.metric("Power Draw", f"{pwr:.1f} kW")
+    with t_col3:
+        st.metric("Battery Capacity", f"{battery_cap} Wh")
 
-    telemetry = pd.DataFrame({
-
-        "Metric":[
-            "Total Time",
-            "Distance Travelled",
-            "Max Speed",
-            "Robot Mass",
-            "Track Width"
-        ],
-
-        "Value":[
-            round(time_elapsed,2),
-            round(distance,2),
-            round(max(speeds),2),
-            mass,
-            track_width
+    st.subheader("⚙️ Robot Performance Specs")
+    
+    # This table pulls Torque, RPM, and Battery from your Builder page
+    performance_specs = pd.DataFrame({
+        "Component": ["Motor Torque", "Max RPM", "Battery Capacity", "Chassis Mass"],
+        "Value": [
+            f"{torque} Nm", 
+            f"{max_rpm} RPM", 
+            f"{battery_cap} Wh", 
+            f"{mass} kg"
         ]
-
     })
-
-    telemetry_col.subheader("Robot Telemetry")
-    telemetry_col.table(telemetry)
-
-    speed_fig=go.Figure()
-
-    speed_fig.add_trace(go.Scatter(
-        x=times,
-        y=speeds,
-        mode="lines"
-    ))
-
-    speed_fig.update_layout(
-        template="plotly_dark",
-        title="Speed vs Time",
-        xaxis_title="Time",
-        yaxis_title="Speed"
-    )
-
-    st.plotly_chart(speed_fig,use_container_width=True)
-
-    heading_fig=go.Figure()
-
-    heading_fig.add_trace(go.Scatter(
-        x=times,
-        y=headings,
-        mode="lines"
-    ))
-
-    heading_fig.update_layout(
-        template="plotly_dark",
-        title="Heading vs Time",
-        xaxis_title="Time",
-        yaxis_title="Heading"
-    )
-
-    st.plotly_chart(heading_fig,use_container_width=True)
+    
+    st.table(performance_specs)
