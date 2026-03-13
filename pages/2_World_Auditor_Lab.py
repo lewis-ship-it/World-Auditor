@@ -276,70 +276,56 @@ if run and path:
 # TELEMETRY
 # ---------------------------------------------------------
 
-# ---------------------------------------------------------
-# TELEMETRY
-# ---------------------------------------------------------
-
 if positions:
-    # Safety Check: Pull from session_state or use a placeholder if missing
-    # This prevents the NameError you just saw
-    robot_data = st.session_state.get("robot_config", {})
-    tq = robot_data.get("motor_torque", "N/A")
-    rpm = robot_data.get("max_rpm", "N/A")
-    bat = robot_data.get("battery_capacity", "N/A")
 
     telemetry = pd.DataFrame({
+
         "Metric":[
             "Total Time",
-            "Distance Travelled",
-            "Max Speed achieved",
+            "Distance",
+            "Max Speed",
             "Robot Mass",
-            "Motor Torque",
-            "Max RPM",
-            "Battery Capacity"
+            "Track Width"
         ],
+
         "Value":[
-            f"{time_elapsed:.2f} s",
-            f"{distance:.2f} m",
-            f"{max(speeds):.2f} m/s",
-            f"{mass} kg",
-            f"{tq} Nm",
-            f"{rpm} RPM",
-            f"{bat} Wh"
+            round(time_elapsed,2),
+            round(distance,2),
+            max(speeds),
+            mass,
+            track_width
         ]
     })
 
     telemetry_col.subheader("Telemetry")
     telemetry_col.table(telemetry)
 
-    # Speed Chart
     speed_fig = go.Figure()
+
     speed_fig.add_trace(go.Scatter(
         x=times,
         y=speeds,
-        mode="lines",
-        line=dict(color="#00CC96")
+        mode="lines"
     ))
+
     speed_fig.update_layout(
         template="plotly_dark",
-        title="Speed vs Time",
-        xaxis_title="Time (s)",
-        yaxis_title="Velocity (m/s)"
+        title="Speed vs Time"
     )
-    st.plotly_chart(speed_fig, use_container_width=True)
 
-    # Heading Chart
+    st.plotly_chart(speed_fig,use_container_width=True)
+
     heading_fig = go.Figure()
+
     heading_fig.add_trace(go.Scatter(
         x=times,
         y=headings,
-        mode="lines",
-        line=dict(color="#AB63FA")
+        mode="lines"
     ))
+
     heading_fig.update_layout(
         template="plotly_dark",
-        title="Heading vs Time",
-        xaxis_title="Time (s)",
-        yaxis_title="Heading (rad)"
+        title="Heading vs Time"
     )
-    st.plotly_chart(heading_fig, use_container_width=True)
+
+    st.plotly_chart(heading_fig,use_container_width=True)
