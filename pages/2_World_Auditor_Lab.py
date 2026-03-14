@@ -1,84 +1,103 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+import pandas as pd
 import heapq
 import time
-import pandas as pd
 
-st.set_page_config(layout="wide", page_title="World Auditor Lab")
+st.set_page_config(
+    page_title="World Auditor Simulator",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("🤖 World Auditor Navigation Simulator")
-
-# -------------------------------------------------
-# CONSTANTS
-# -------------------------------------------------
-
-GRID = 80
-WORLD_SIZE = 20
-CELL = WORLD_SIZE / GRID
-
-g = 9.81
-dt = 0.05
+st.title("🤖 World Auditor Robot Simulator")
 
 # -------------------------------------------------
-# LOAD ROBOT CONFIG
+# SESSION STATE
 # -------------------------------------------------
 
 if "robot_cfg" not in st.session_state:
+    st.session_state.robot_cfg = None
 
-    st.error("⚠ Build a robot first in the Robot Builder page.")
-    st.stop()
-
-robot = st.session_state.robot_cfg
-
-mass = robot["mass"]
-wheelbase = robot["wheelbase"]
-traction = robot["traction"]
-motor_force = robot["motor_force"]
+if "telemetry" not in st.session_state:
+    st.session_state.telemetry = []
 
 # -------------------------------------------------
-# GENERATE TEST TERRAIN
-# -------------------------------------------------
-
-np.random.seed(0)
-
-x = np.linspace(-3,3,GRID)
-y = np.linspace(-3,3,GRID)
-
-X,Y = np.meshgrid(x,y)
-
-elevation = np.sin(X)*np.cos(Y)*2
-elevation += np.exp(-(X**2 + Y**2))*4
-
-# friction map
-
-friction = np.ones((GRID,GRID))*0.9
-
-friction[20:40,10:30] = 0.3
-friction[50:70,50:70] = 0.1
-
-# obstacles
-
-obstacles = np.zeros((GRID,GRID))
-
-obstacles[30:35,:] = 1
-obstacles[:,40:42] = 1
-
-# -------------------------------------------------
-# SIDEBAR CONTROLS
+# SIDEBAR
 # -------------------------------------------------
 
 with st.sidebar:
 
-    st.header("Simulation")
+    st.header("Robot Configuration")
 
-    start_x = st.slider("Start X",0,GRID-1,5)
-    start_y = st.slider("Start Y",0,GRID-1,5)
+    mass = st.slider("Mass (kg)",10,200,50)
+    wheelbase = st.slider("Wheelbase (m)",0.2,2.0,0.5)
+    traction = st.slider("Traction Coefficient",0.1,1.5,0.8)
+    motor_force = st.slider("Motor Force (N)",50,1000,200)
 
-    goal_x = st.slider("Goal X",0,GRID-1,70)
-    goal_y = st.slider("Goal Y",0,GRID-1,70)
+    if st.button("Save Robot"):
 
-    run = st.button("Run Navigation")
+        st.session_state.robot_cfg = {
+            "mass":mass,
+            "wheelbase":wheelbase,
+            "traction":traction,
+            "motor_force":motor_force
+        }
+
+        st.success("Robot saved!")
+
+# -------------------------------------------------
+# TABS
+# -------------------------------------------------
+
+tab1,tab2,tab3,tab4 = st.tabs([
+    "Robot Builder",
+    "Navigation Simulator",
+    "Telemetry",
+    "Terrain Analysis"
+])
+
+# -------------------------------------------------
+# ROBOT BUILDER TAB
+# -------------------------------------------------
+
+with tab1:
+
+    st.header("Robot Builder")
+
+    if st.session_state.robot_cfg:
+
+        st.success("Robot Loaded")
+
+        st.json(st.session_state.robot_cfg)
+
+    else:
+
+        st.info("Configure robot in sidebar")
+
+# -------------------------------------------------
+# TERRAIN
+# -------------------------------------------------
+
+GRID=80
+g=9.81
+dt=0.05
+
+x=np.linspace(-3,3,GRID)
+y=np.linspace(-3,3,GRID)
+X,Y=np.meshgrid(x,y)
+
+elevation=np.sin(X)*np.cos(Y)*2
+elevation+=np.exp(-(X**2+Y**2))*4
+
+friction=np.ones((GRID,GRID))*0.9
+friction[20:40,10:30]=0.3
+friction[50:70,50:70]=0.1
+
+obstacles=np.zeros((GRID,GRID))
+obstacles[30:35,:]=1
+obstacles[:,40:42]=1
 
 # -------------------------------------------------
 # PATH PLANNER
@@ -103,6 +122,7 @@ def astar(grid,start,goal):
             path=[cur]
 
             while cur in came:
+
                 cur=came[cur]
                 path.append(cur)
 
@@ -135,160 +155,184 @@ def astar(grid,start,goal):
     return []
 
 # -------------------------------------------------
-# COMPUTE PATH
+# NAVIGATION TAB
 # -------------------------------------------------
 
-start=(start_x,start_y)
-goal=(goal_x,goal_y)
+with tab2:
 
-path = astar(obstacles,start,goal)
+    st.header("Navigation Simulator")
 
-# -------------------------------------------------
-# ROBOT SIMULATION
-# -------------------------------------------------
+    if not st.session_state.robot_cfg:
 
-robot_pos=None
-speed=0
-time_elapsed=0
+        st.warning("Build a robot first.")
+        st.stop()
 
-telemetry=[]
+    robot=st.session_state.robot_cfg
 
-if run and path:
+    start_x=st.slider("Start X",0,GRID-1,5)
+    start_y=st.slider("Start Y",0,GRID-1,5)
 
-    robot_pos=np.array(path[0],dtype=float)
+    goal_x=st.slider("Goal X",0,GRID-1,70)
+    goal_y=st.slider("Goal Y",0,GRID-1,70)
 
-    for target in path[1:]:
+    run=st.button("Run Simulation")
 
-        target=np.array(target)
+    start=(start_x,start_y)
+    goal=(goal_x,goal_y)
 
-        while True:
+    path=astar(obstacles,start,goal)
 
-            direction=target-robot_pos
-            dist=np.linalg.norm(direction)
+    telemetry=[]
 
-            if dist < 0.1:
-                break
+    if run and path:
 
-            direction/=dist
+        robot_pos=np.array(path[0],dtype=float)
 
-            mu = friction[int(robot_pos[0]),int(robot_pos[1])]
+        speed=0
+        time_elapsed=0
 
-            max_traction_speed = np.sqrt(mu*g*wheelbase)
+        for target in path[1:]:
 
-            accel = motor_force/mass
+            target=np.array(target)
 
-            speed += accel*dt
-            speed = min(speed,max_traction_speed)
+            while True:
 
-            robot_pos += direction*speed*dt
+                direction=target-robot_pos
+                dist=np.linalg.norm(direction)
 
-            curvature = 1/max(dist,0.01)
+                if dist<0.1:
+                    break
 
-            brake = speed**2/(2*mu*g)
+                direction/=dist
 
-            slip = speed > max_traction_speed
+                mu=friction[int(robot_pos[0]),int(robot_pos[1])]
 
-            telemetry.append([
-                time_elapsed,
-                robot_pos[0],
-                robot_pos[1],
-                speed,
-                accel,
-                mu,
-                curvature,
-                brake,
-                slip
-            ])
+                max_speed=np.sqrt(mu*g*robot["wheelbase"])
 
-            time_elapsed+=dt
+                accel=robot["motor_force"]/robot["mass"]
 
-# -------------------------------------------------
-# TELEMETRY TABLE
-# -------------------------------------------------
+                speed+=accel*dt
+                speed=min(speed,max_speed)
 
-telemetry_df = pd.DataFrame(
-    telemetry,
-    columns=[
-        "time",
-        "x",
-        "y",
-        "speed",
-        "accel",
-        "friction",
-        "curvature",
-        "brake_distance",
-        "slip"
-    ]
-)
+                robot_pos+=direction*speed*dt
 
-# -------------------------------------------------
-# 3D VISUALIZATION
-# -------------------------------------------------
+                curvature=1/max(dist,0.01)
 
-fig = go.Figure()
+                brake=speed**2/(2*mu*g)
 
-fig.add_trace(go.Surface(
-    z=elevation,
-    colorscale="Viridis",
-    showscale=False
-))
+                slip=speed>max_speed
 
-if path:
+                telemetry.append([
+                    time_elapsed,
+                    robot_pos[0],
+                    robot_pos[1],
+                    speed,
+                    accel,
+                    mu,
+                    curvature,
+                    brake,
+                    slip
+                ])
 
-    xs=[p[0] for p in path]
-    ys=[p[1] for p in path]
-    zs=[elevation[x][y]+0.5 for x,y in path]
+                time_elapsed+=dt
 
-    fig.add_trace(go.Scatter3d(
-        x=xs,
-        y=ys,
-        z=zs,
-        mode="lines",
-        line=dict(color="yellow",width=6),
-        name="Path"
-    ))
-
-if telemetry:
-
-    fig.add_trace(go.Scatter3d(
-        x=telemetry_df["x"],
-        y=telemetry_df["y"],
-        z=elevation[
-            telemetry_df["x"].astype(int),
-            telemetry_df["y"].astype(int)
-        ]+1,
-        mode="markers",
-        marker=dict(size=4,color="red"),
-        name="Robot"
-    ))
-
-fig.update_layout(
-
-    template="plotly_dark",
-    height=700,
-
-    scene=dict(
-        xaxis_title="X Position",
-        yaxis_title="Y Position",
-        zaxis_title="Elevation"
+    df=pd.DataFrame(
+        telemetry,
+        columns=[
+            "time","x","y","speed",
+            "accel","friction",
+            "curvature",
+            "brake_distance",
+            "slip"
+        ]
     )
-)
 
-st.plotly_chart(fig,use_container_width=True)
+    st.session_state.telemetry=df
+
+    # 3D Map
+
+    fig=go.Figure()
+
+    fig.add_trace(go.Surface(
+        z=elevation,
+        colorscale="Viridis",
+        showscale=False
+    ))
+
+    if path:
+
+        xs=[p[0] for p in path]
+        ys=[p[1] for p in path]
+        zs=[elevation[x][y]+0.5 for x,y in path]
+
+        fig.add_trace(go.Scatter3d(
+            x=xs,
+            y=ys,
+            z=zs,
+            mode="lines",
+            line=dict(color="yellow",width=6)
+        ))
+
+    if not df.empty:
+
+        fig.add_trace(go.Scatter3d(
+            x=df["x"],
+            y=df["y"],
+            z=elevation[
+                df["x"].astype(int),
+                df["y"].astype(int)
+            ]+1,
+            mode="markers",
+            marker=dict(size=4,color="red")
+        ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=700
+    )
+
+    st.plotly_chart(fig,use_container_width=True)
 
 # -------------------------------------------------
-# TELEMETRY UI
+# TELEMETRY TAB
 # -------------------------------------------------
 
-st.subheader("Robot Telemetry")
+with tab3:
 
-if not telemetry_df.empty:
+    st.header("Telemetry")
 
-    col1,col2,col3,col4 = st.columns(4)
+    df=st.session_state.telemetry
 
-    col1.metric("Final Speed",round(telemetry_df.speed.iloc[-1],2))
-    col2.metric("Total Time",round(telemetry_df.time.iloc[-1],2))
-    col3.metric("Max Brake Distance",round(telemetry_df.brake_distance.max(),2))
-    col4.metric("Slip Events",telemetry_df.slip.sum())
+    if df is None or df.empty:
 
-    st.dataframe(telemetry_df)
+        st.info("Run simulation to generate telemetry")
+
+    else:
+
+        col1,col2,col3,col4=st.columns(4)
+
+        col1.metric("Total Time",round(df.time.iloc[-1],2))
+        col2.metric("Max Speed",round(df.speed.max(),2))
+        col3.metric("Max Brake Distance",round(df.brake_distance.max(),2))
+        col4.metric("Slip Events",df.slip.sum())
+
+        st.dataframe(df)
+
+# -------------------------------------------------
+# TERRAIN TAB
+# -------------------------------------------------
+
+with tab4:
+
+    st.header("Terrain Maps")
+
+    st.subheader("Elevation")
+
+    st.plotly_chart(
+        go.Figure(go.Surface(z=elevation)),
+        use_container_width=True
+    )
+
+    st.subheader("Friction")
+
+    st.imshow(friction)
