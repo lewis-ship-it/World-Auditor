@@ -2,117 +2,91 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import heapq
-import pandas as pd
 import time
+import pandas as pd
 
-st.set_page_config(layout="wide", page_title="World Auditor RViz Simulator")
+st.set_page_config(layout="wide", page_title="World Auditor Lab")
 
 st.title("🤖 World Auditor Navigation Simulator")
 
-# ---------------------------------------------------------
-# SAFE ROBOT LOADING
-# ---------------------------------------------------------
-
-if "robot" not in st.session_state:
-    st.warning("No robot found — loading default robot")
-    st.session_state.robot = {
-        "mass": 500,
-        "motor_torque": 120,   # Added to default
-        "max_rpm": 3000,       # Added to default
-        "battery_capacity": 500, # Added to default
-        "max_speed": 10,
-        "track_width": 0.6,
-        "wheel_radius": 0.25
-    }
-
-robot = st.session_state.robot
-
-# Use .get("key", default_value) to prevent crashes
-mass = robot.get("mass", 500)
-torque = robot.get("motor_torque", 120) 
-max_rpm = robot.get("max_rpm", 3000)
-battery_cap = robot.get("battery_capacity", 500)
-max_speed = robot.get("max_speed", 10.0)
-track_width = robot.get("track_width", 0.6)
-wheel_radius = robot.get("wheel_radius", 0.25)
-
-# Calculate physics-based accel
-accel = (torque / wheel_radius) / mass
-
-# ---------------------------------------------------------
+# -------------------------------------------------
 # CONSTANTS
-# ---------------------------------------------------------
+# -------------------------------------------------
 
-GRID = 100
-dt = 0.1
+GRID = 80
+WORLD_SIZE = 20
+CELL = WORLD_SIZE / GRID
+
 g = 9.81
+dt = 0.05
 
-# ---------------------------------------------------------
-# MAP SERVER
-# ---------------------------------------------------------
-def generate_world():
-    # Standardizing names to avoid NameError
-    elevation = np.zeros((GRID, GRID))
-    friction = np.ones((GRID, GRID))
-    obstacle = np.zeros((GRID, GRID))
+# -------------------------------------------------
+# LOAD ROBOT CONFIG
+# -------------------------------------------------
 
-    # --- PRESET 1: THE TORQUE CLIMB ---
-    # Elevation rises to test motor torque vs mass
-    for x in range(0, 25):
-        elevation[x, :] = (x / 4) 
+if "robot_cfg" not in st.session_state:
 
-    # --- PRESET 2: THE TIRE TEST ZONES ---
-    # Mud Zone (Medium Grip)
-    friction[35:50, :] = 0.4 
-    # Ice Zone (Low Grip)
-    friction[60:75, :] = 0.1 
+    st.error("⚠ Build a robot first in the Robot Builder page.")
+    st.stop()
 
-    # --- PRESET 3: NAVIGATION WALL ---
-    obstacle[85, 0:40] = 1
-    obstacle[85, 60:100] = 1
+robot = st.session_state.robot_cfg
 
-    return elevation, friction, obstacle
+mass = robot["mass"]
+wheelbase = robot["wheelbase"]
+traction = robot["traction"]
+motor_force = robot["motor_force"]
 
-# Ensure these match the return statement exactly
-elevation, friction, obstacle = generate_world()
+# -------------------------------------------------
+# GENERATE TEST TERRAIN
+# -------------------------------------------------
 
-# ---------------------------------------------------------
-# COSTMAP (ROS style)
-# ---------------------------------------------------------
+np.random.seed(0)
 
-costmap = obstacle.copy()
+x = np.linspace(-3,3,GRID)
+y = np.linspace(-3,3,GRID)
 
-inflation_radius = 3
+X,Y = np.meshgrid(x,y)
 
-for x in range(GRID):
-    for y in range(GRID):
+elevation = np.sin(X)*np.cos(Y)*2
+elevation += np.exp(-(X**2 + Y**2))*4
 
-        if obstacle[x,y] == 1:
+# friction map
 
-            for i in range(-inflation_radius, inflation_radius):
-                for j in range(-inflation_radius, inflation_radius):
+friction = np.ones((GRID,GRID))*0.9
 
-                    nx = x+i
-                    ny = y+j
+friction[20:40,10:30] = 0.3
+friction[50:70,50:70] = 0.1
 
-                    if 0 <= nx < GRID and 0 <= ny < GRID:
-                        costmap[nx,ny] = max(costmap[nx,ny],0.5)
+# obstacles
 
-# ---------------------------------------------------------
-# START GOAL
-# ---------------------------------------------------------
+obstacles = np.zeros((GRID,GRID))
 
-start = (5,5)
-goal = (90,90)
+obstacles[30:35,:] = 1
+obstacles[:,40:42] = 1
 
-# ---------------------------------------------------------
-# GLOBAL PLANNER
-# ---------------------------------------------------------
+# -------------------------------------------------
+# SIDEBAR CONTROLS
+# -------------------------------------------------
+
+with st.sidebar:
+
+    st.header("Simulation")
+
+    start_x = st.slider("Start X",0,GRID-1,5)
+    start_y = st.slider("Start Y",0,GRID-1,5)
+
+    goal_x = st.slider("Goal X",0,GRID-1,70)
+    goal_y = st.slider("Goal Y",0,GRID-1,70)
+
+    run = st.button("Run Navigation")
+
+# -------------------------------------------------
+# PATH PLANNER
+# -------------------------------------------------
 
 def astar(grid,start,goal):
 
-    def h(a,b):
-        return abs(a[0]-b[0]) + abs(a[1]-b[1])
+    h=lambda a,b:abs(a[0]-b[0])+abs(a[1]-b[1])
 
     open=[]
     heapq.heappush(open,(0,start))
@@ -143,268 +117,178 @@ def astar(grid,start,goal):
             if nx<0 or ny<0 or nx>=GRID or ny>=GRID:
                 continue
 
-            if grid[nx,ny] >= 0.5:
+            if grid[nx,ny]==1:
                 continue
 
             new=cost[cur]+1
 
             if (nx,ny) not in cost or new<cost[(nx,ny)]:
 
-                cost[(nx,ny)] = new
-                came[(nx,ny)] = cur
+                cost[(nx,ny)]=new
+                came[(nx,ny)]=cur
 
-                heapq.heappush(open,(new+h((nx,ny),goal),(nx,ny)))
+                heapq.heappush(
+                    open,
+                    (new+h((nx,ny),goal),(nx,ny))
+                )
 
     return []
 
-path = astar(costmap,start,goal)
+# -------------------------------------------------
+# COMPUTE PATH
+# -------------------------------------------------
 
-# ---------------------------------------------------------
-# UI
-# ---------------------------------------------------------
+start=(start_x,start_y)
+goal=(goal_x,goal_y)
 
-map_col, telemetry_col = st.columns([3,1])
+path = astar(obstacles,start,goal)
 
-run = st.button("Start Navigation")
+# -------------------------------------------------
+# ROBOT SIMULATION
+# -------------------------------------------------
 
-placeholder = map_col.empty()
-
-# ---------------------------------------------------------
-# ROBOT STATE
-# ---------------------------------------------------------
-
-x,y = start
-theta = 0
-speed = 0
-
-positions=[]
-speeds=[]
-times=[]
-frictions=[]
-headings=[]
-
-distance=0
+robot_pos=None
+speed=0
 time_elapsed=0
 
-# ---------------------------------------------------------
-# SIMULATION
-# ---------------------------------------------------------
+telemetry=[]
 
 if run and path:
-    # Initialize tracking lists before the loop starts
-    positions, speeds, times, frictions, headings, efforts = [], [], [], [], [], []
-    x, y = path[0]  # Start at the first waypoint
-    theta, speed, distance, time_elapsed = 0.0, 0.0, 0.0, 0.0
 
-    for wp in path:
-        wx, wy = wp
-        dx, dy = wx - x, wy - y
-        
-        target_heading = np.arctan2(dy, dx)
-        heading_error = target_heading - theta
-        omega = heading_error # Simple P-controller for steering
-        
-        # 1. Physics-based Velocity
-        v = min(speed + accel * dt, max_speed)
-        
-        # 2. Update Position
-        theta += omega * dt
-        x += v * np.cos(theta) * dt
-        y += v * np.sin(theta) * dt
-        speed = v
-        
-        # 3. Environment Sampling
-        rx, ry = int(np.clip(x, 0, GRID-1)), int(np.clip(y, 0, GRID-1))
-        mu = friction[rx, ry]
-        
-        # Calculate Slope (for Torque/Power Audit)
-        # We look at the elevation change to see if we are climbing
-        slope_grad = np.gradient(elevation)
-        curr_slope = slope_grad[0][rx, ry] 
-        
-        # 4. POWER & EFFORT CALCULATION (The Fix)
-        # Force_total = Force_accel + Force_gravity + Force_friction
-        f_accel = mass * accel
-        f_gravity = mass * g * np.sin(np.arctan(curr_slope))
-        f_friction = mass * g * mu * 0.01 # Rolling resistance
-        
-        total_force_required = f_accel + f_gravity + f_friction
-        
-        # Power (Watts) = Force (N) * Velocity (m/s)
-        power_draw = abs(total_force_required * v)
-        
-        # Max Power = (Torque * RPM) / 9.5488
-        max_motor_power = (torque * max_rpm) / 9.5488
-        
-        # Calculate Effort %
-        if max_motor_power > 0:
-            current_effort = (power_draw / max_motor_power) * 100
-        else:
-            current_effort = 0
-            
-        # 5. DATA LOGGING
-        efforts.append(min(current_effort, 100)) # Clamp to 100%
-        distance += v * dt
-        time_elapsed += dt
-        
-        positions.append((x, y))
-        speeds.append(v)
-        times.append(time_elapsed)
-        frictions.append(mu)
-        headings.append(theta)
+    robot_pos=np.array(path[0],dtype=float)
 
-        
-        # ------------------------------------
-        # RVIZ STYLE MAP
-        # ------------------------------------
+    for target in path[1:]:
 
-        fig = go.Figure()
+        target=np.array(target)
 
-        fig.add_trace(go.Heatmap(
-            z=costmap,
-            colorscale="inferno",
-            showscale=False
-        ))
+        while True:
 
-        xs=[p[0] for p in path]
-        ys=[p[1] for p in path]
+            direction=target-robot_pos
+            dist=np.linalg.norm(direction)
 
-        fig.add_trace(go.Scatter(
-            x=xs,
-            y=ys,
-            mode="lines",
-            line=dict(color="cyan",width=3),
-            name="Global Path"
-        ))
+            if dist < 0.1:
+                break
 
-        fig.add_trace(go.Scatter(
-            x=[x],
-            y=[y],
-            mode="markers",
-            marker=dict(size=12,color="red"),
-            name="Robot"
-        ))
+            direction/=dist
 
-        # robot heading arrow
+            mu = friction[int(robot_pos[0]),int(robot_pos[1])]
 
-        fig.add_annotation(
-            x=x,
-            y=y,
-            ax=x+np.cos(theta)*3,
-            ay=y+np.sin(theta)*3,
-            showarrow=True,
-            arrowwidth=3
-        )
+            max_traction_speed = np.sqrt(mu*g*wheelbase)
 
-        fig.update_layout(
-            template="plotly_dark",
-            height=700,
-            xaxis_title="Map X",
-            yaxis_title="Map Y"
-        )
+            accel = motor_force/mass
 
-        placeholder.plotly_chart(fig,use_container_width=True)
+            speed += accel*dt
+            speed = min(speed,max_traction_speed)
 
-        time.sleep(0.03)
+            robot_pos += direction*speed*dt
 
+            curvature = 1/max(dist,0.01)
 
-# ---------------------------------------------------------
-# TELEMETRY
-# ---------------------------------------------------------
+            brake = speed**2/(2*mu*g)
 
+            slip = speed > max_traction_speed
 
-if positions:
-    st.divider()
-    
-    # 1. DATA PREPARATION & SUMMARY TABLE
-    # Standardizing data retrieval from session state
-    robot_data = st.session_state.get("robot_config", st.session_state.get("robot", {}))
-    tq = robot_data.get("motor_torque", 120)
-    rpm = robot_data.get("max_rpm", 3000)
-    bc = robot_data.get("battery_capacity", 500)
+            telemetry.append([
+                time_elapsed,
+                robot_pos[0],
+                robot_pos[1],
+                speed,
+                accel,
+                mu,
+                curvature,
+                brake,
+                slip
+            ])
 
-    telemetry_summary = pd.DataFrame({
-        "Metric": ["Motor Torque", "Max RPM", "Battery Capacity", "Total Distance", "Max Speed"],
-        "Value": [
-            f"{tq} Nm", 
-            f"{rpm} RPM", 
-            f"{bc} Wh", 
-            f"{distance:.2f} m", 
-            f"{max(speeds):.2f} m/s"
-        ]
-    })
-    
-    telemetry_col.subheader("📊 Performance Audit Results")
-    telemetry_col.table(telemetry_summary)
+            time_elapsed+=dt
 
-    # 2. VELOCITY PROFILE (Neon Cyan)
-    speed_fig = go.Figure()
-    speed_fig.add_trace(go.Scatter(
-        x=times, y=speeds, mode="lines", 
-        line=dict(color="#00e5ff", width=3, shape='spline'),
-        fill='tozeroy', fillcolor='rgba(0, 229, 255, 0.1)',
-        name="Velocity",
-        hovertemplate="<b>Time</b>: %{x}s<br><b>Speed</b>: %{y:.2f} m/s<br><i>Def: Linear velocity of the robot.</i><extra></extra>"
+# -------------------------------------------------
+# TELEMETRY TABLE
+# -------------------------------------------------
+
+telemetry_df = pd.DataFrame(
+    telemetry,
+    columns=[
+        "time",
+        "x",
+        "y",
+        "speed",
+        "accel",
+        "friction",
+        "curvature",
+        "brake_distance",
+        "slip"
+    ]
+)
+
+# -------------------------------------------------
+# 3D VISUALIZATION
+# -------------------------------------------------
+
+fig = go.Figure()
+
+fig.add_trace(go.Surface(
+    z=elevation,
+    colorscale="Viridis",
+    showscale=False
+))
+
+if path:
+
+    xs=[p[0] for p in path]
+    ys=[p[1] for p in path]
+    zs=[elevation[x][y]+0.5 for x,y in path]
+
+    fig.add_trace(go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="lines",
+        line=dict(color="yellow",width=6),
+        name="Path"
     ))
-    speed_fig.update_layout(
-        template="plotly_dark", title="V-ACTUAL (Velocity Profile)", 
-        height=280, margin=dict(l=20, r=20, t=40, b=20)
-    )
-    st.plotly_chart(speed_fig, use_container_width=True)
 
-    # 3. CONTROL EFFORT (Neon Yellow)
-    if efforts:
-        effort_fig = go.Figure()
-        effort_fig.add_trace(go.Scatter(
-            x=times, y=efforts, mode="lines", 
-            line=dict(color="#ffea00", width=3, shape='spline'),
-            fill='tozeroy', fillcolor='rgba(255, 234, 0, 0.1)',
-            name="Load",
-            hovertemplate="<b>Time</b>: %{x}s<br><b>Load</b>: %{y:.1f}%<br><i>Def: % of motor capacity used.</i><extra></extra>"
-        ))
-        effort_fig.update_layout(
-            template="plotly_dark", title="MOTOR LOAD (% Effort)", 
-            yaxis=dict(range=[0, 110]), height=280,
-            margin=dict(l=20, r=20, t=40, b=20)
-        )
-        st.plotly_chart(effort_fig, use_container_width=True)
+if telemetry:
 
-    # 4. GRIP & TRACTION AUDIT (Neon Green)
-    if frictions:
-        grip_fig = go.Figure()
-        grip_fig.add_trace(go.Scatter(
-            x=times, y=frictions, mode="lines", 
-            line=dict(color="#00ff88", width=3, dash='dash'),
-            name="Friction",
-            hovertemplate="<b>Time</b>: %{x}s<br><b>Mu</b>: %{y}<br><i>Def: Traction coefficient (1.0=Max Grip).</i><extra></extra>"
-        ))
-        grip_fig.update_layout(
-            template="plotly_dark", title="TIRE TRACTION (Coefficient of Friction)", 
-            yaxis=dict(range=[0, 1.1]), height=280,
-            margin=dict(l=20, r=20, t=40, b=20)
-        )
-        st.plotly_chart(grip_fig, use_container_width=True)
-
-    # 5. HEADING PROFILE (Neon Pink)
-    heading_fig = go.Figure()
-    heading_fig.add_trace(go.Scatter(
-        x=times, y=headings, mode="lines", 
-        line=dict(color="#ff007f", width=3),
-        name="Theta",
-        hovertemplate="<b>Time</b>: %{x}s<br><b>Yaw</b>: %{y:.2f} rad<br><i>Def: Angular orientation.</i><extra></extra>"
+    fig.add_trace(go.Scatter3d(
+        x=telemetry_df["x"],
+        y=telemetry_df["y"],
+        z=elevation[
+            telemetry_df["x"].astype(int),
+            telemetry_df["y"].astype(int)
+        ]+1,
+        mode="markers",
+        marker=dict(size=4,color="red"),
+        name="Robot"
     ))
-    heading_fig.update_layout(
-        template="plotly_dark", title="YAW ORIENTATION (Radians)", 
-        height=280, margin=dict(l=20, r=20, t=40, b=20)
-    )
-    st.plotly_chart(heading_fig, use_container_width=True)
 
-    # 6. DATA GLOSSARY
-    with st.expander("📚 Engineering Definitions"):
-        st.markdown("""
-        **How to read these charts:**
-        - **Velocity (m/s)**: Shows acceleration performance. Steep curves mean high torque-to-weight ratio.
-        - **Control Effort (%)**: Shows motor stress. Spikes indicate high inclines (gravity) or surface resistance. 100% means the motor is at its physical limit.
-        - **Traction (Mu)**: Higher is better. When Mu drops (e.g., 0.1 for Ice), look at the Velocity chart to see if the robot slows down or slides.
-        - **Yaw (Theta)**: Tracks steering stability. Jittery lines here suggest the steering PID is over-correcting.
-        """)
+fig.update_layout(
+
+    template="plotly_dark",
+    height=700,
+
+    scene=dict(
+        xaxis_title="X Position",
+        yaxis_title="Y Position",
+        zaxis_title="Elevation"
+    )
+)
+
+st.plotly_chart(fig,use_container_width=True)
+
+# -------------------------------------------------
+# TELEMETRY UI
+# -------------------------------------------------
+
+st.subheader("Robot Telemetry")
+
+if not telemetry_df.empty:
+
+    col1,col2,col3,col4 = st.columns(4)
+
+    col1.metric("Final Speed",round(telemetry_df.speed.iloc[-1],2))
+    col2.metric("Total Time",round(telemetry_df.time.iloc[-1],2))
+    col3.metric("Max Brake Distance",round(telemetry_df.brake_distance.max(),2))
+    col4.metric("Slip Events",telemetry_df.slip.sum())
+
+    st.dataframe(telemetry_df)
