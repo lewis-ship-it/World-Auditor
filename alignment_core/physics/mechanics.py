@@ -1,4 +1,25 @@
 from ..world_model.primitives import Vector3
+# FILE: alignment_core/physics/mechanics.py
+
+class TireModel:
+    def __init__(self, cornering_stiffness=15000, relaxation_length=0.12):
+        """
+        cornering_stiffness (N/rad): How much lateral force the tire generates per radian of slip.
+        relaxation_length (m): The distance the tire must roll to develop full lateral force.
+        """
+        self.ca = cornering_stiffness
+        self.sigma = relaxation_length
+
+    def calculate_lateral_force(self, slip_angle_rad, normal_force):
+        """
+        Computes lateral force based on slip angle and load.
+        Note: Real tires saturate; we cap this at the friction limit in the kernel.
+        """
+        # F_y = Ca * alpha
+        # We scale Ca by the normal force ratio to account for load sensitivity
+        nominal_load = 500  # Newtons
+        load_scaling = normal_force / nominal_load
+        return self.ca * slip_angle_rad * load_scaling
 def get_dynamic_forces(mass, accel, com_h, wheelbase):
     """Calculates weight shift during braking."""
     g = 9.81
