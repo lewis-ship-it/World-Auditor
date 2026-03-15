@@ -1,5 +1,30 @@
 from ..world_model.primitives import Vector3
 # FILE: alignment_core/physics/mechanics.py
+class RigidBody:
+    """
+    The 'Body' - Stores the immutable physical constants of the robot.
+    """
+    def __init__(self, mass, track_width, wheelbase, cog_z, 
+                 cog_bias_x=0.0, cog_bias_y=0.0, 
+                 k_suspension=25000, c_damping=1500, 
+                 frontal_area=0.5, max_braking_force=500):
+        self.m = mass          # kg
+        self.tw = track_width  # m
+        self.wb = wheelbase    # m
+        self.cog_z = cog_z     # m (Height of CoG)
+        
+        # ASYMMETRIC COG: Offset from center (0.0 is center)
+        self.cog_y = cog_bias_y # + is right, - is left
+        self.cog_x = cog_bias_x # + is forward, - is rear
+        
+        # SUSPENSION, AERO, & BRAKES
+        self.k = k_suspension  # N/m
+        self.c = c_damping     # Ns/m
+        self.area = frontal_area 
+        self.max_f_brake = max_braking_force
+        
+        self.g = 9.81
+        self.rho = 1.225       # Air density
 
 class TireModel:
     def __init__(self, cornering_stiffness=15000, relaxation_length=0.12):
