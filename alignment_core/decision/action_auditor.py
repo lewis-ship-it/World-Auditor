@@ -18,7 +18,7 @@ class ActionAuditor:
         
         # 1. Update Physical State (Load Kernel)
         if payload:
-            load_res = self.load.apply_payload(
+            load_res = self.load.update_payload(
                 payload['mass'], payload['x'], payload['y'], payload['z']
             )
             results['load'] = load_res

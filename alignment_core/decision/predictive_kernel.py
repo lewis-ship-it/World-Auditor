@@ -9,33 +9,41 @@ class PredictiveKernel:
         """
         self.auditor = auditor
 
-    def find_optimal_velocity(self, radius, slope=0, dist_to_obj=100, max_possible=40.0):
+    # FILE: alignment_core/decision/predictive_kernel.py
+
+class PredictiveKernel:
+    def __init__(self, auditor):
+        self.auditor = auditor
+
+    def find_optimal_velocity(self, radius, slope=0, dist_to_obj=100, max_possible=40.0, payload=None):
         """
-        Uses a binary search to find the highest safe speed for a specific curve.
+        Calculates the highest safe velocity by iterating through the physics auditor.
         """
         low = 0.0
         high = max_possible
         optimal_v = 0.0
         best_audit = None
 
-        # Binary search for speed optimization (10 iterations for precision)
+        # Binary search for speed optimization
         for _ in range(10):
             mid = (low + high) / 2
-            # We assume acceleration is 0 for steady-state cornering checks
+            
+            # PASS THE PAYLOAD HERE
             audit = self.auditor.audit_intent(
                 v_target=mid, 
                 r_target=radius, 
                 a_target=0, 
                 slope=slope, 
-                dist_to_obj=dist_to_obj
+                dist_to_obj=dist_to_obj,
+                payload=payload  # This was the missing link
             )
 
             if audit["authorized"]:
                 optimal_v = mid
                 best_audit = audit
-                low = mid # Try going faster
+                low = mid 
             else:
-                high = mid # Slow down, physics limit hit
+                high = mid 
 
         return {
             "max_safe_velocity": round(optimal_v, 2),
