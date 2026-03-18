@@ -1,0 +1,40 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/range_rover/RangeRoverSportSVR.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.10520352844656598 0.004253602151140126 0.9944416144103848 3.061248048979026
+  position 18.59850373971805 -2.9504912548038496 4.047314834610128
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 30 30
+  wallHeight 1.5
+}
+RangeRoverSportSVR {
+  hidden position_0_0 -1.2874351608837665e-11
+  hidden position2_0_0 9.785322795560944e-07
+  hidden position_0_1 1.64947739786632e-11
+  hidden position2_0_1 9.785324572462637e-07
+  hidden position_0_2 6.328130992092715e-07
+  hidden position_0_3 6.328134200059549e-07
+  hidden rotation_1 6.437175803861692e-12 -0.9999999999134495 1.3156798070639765e-05 9.784969782461028e-07
+  hidden rotation_2 8.247386988159867e-12 0.9999999998579268 -1.6856644717475363e-05 9.784969782461028e-07
+  hidden rotation_3 0 -1 0 6.329047853230056e-07
+  hidden rotation_4 0 1 0 6.329047853230056e-07
+  translation 0.005805937242397086 1.517713227602634e-09 -0.1488016087412062
+  rotation -2.9510550102314527e-07 0.9999999999999564 4.649479096031595e-09 0.022664464985466457
+  controller "webots_bridge"
+  controllerArgs [
+    ""
+  ]
+  supervisor TRUE
+}

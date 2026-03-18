@@ -1,146 +1,137 @@
 import os
 import sys
-from controller import Robot
+import math
+from controllers import Robot, Keyboard
 
-# 1. PATH CONFIGURATION (Ensuring the AI core is visible to Python)
+# 1. PATH CONFIGURATION
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
 # 2. FULL COMPONENT IMPORTS
 try:
-    # Core Brain & Decision Making
     from alignment_core.main_ai import PhysicsAI
     from alignment_core.decision.action_auditor import ActionAuditor
     from alignment_core.decision.predictive_kernel import PredictiveKernel
-    
-    # Safety Constraint Kernels
     from alignment_core.constraints.stability import StabilityKernel
     from alignment_core.constraints.friction import FrictionKernel
     from alignment_core.constraints.braking import BrakingKernel
     from alignment_core.constraints.load import LoadKernel
-    
-    # Physics & Environment Models
     from alignment_core.physics.mechanics import RigidBody, TireModel
     from alignment_core.world_model.terrain_manager import TerrainManager
-    
-    # Virtual Hardware Interfaces
     from alignment_core.sensors.imu import IMUSensor
     from alignment_core.sensors.encoder import WheelEncoder
-    
     print("SUCCESS: Full alignment_core stack imported.")
 except ImportError as e:
     print(f"CRITICAL: Missing core files. {e}")
     sys.exit(1)
 
-# 3. WEBOTS HARDWARE INITIALIZATION
+# 3. WEBOTS HARDWARE & KEYBOARD INITIALIZATION (CAR/STEERING VERSION)
 robot = Robot()
 timestep = int(robot.getBasicTimeStep())
+keyboard = Keyboard()
+keyboard.enable(timestep)
 
-# Pioneer 3-AT 4-Wheel Drive Configuration
-motor_names = ['front left wheel', 'front right wheel', 'back left wheel', 'back right wheel']
-motors = []
-for name in motor_names:
-    m = robot.getDevice(name)
-    m.setPosition(float('inf')) 
-    m.setVelocity(0.0)
-    motors.append(m)
+print("--- SCANNING BMW X5 FOR DEVICES ---")
+steering_motors = []
+drive_motors = []
+accel = None
 
-# Hardware Sensor Link
-accel = robot.getDevice('accelerometer')
-if accel:
-    accel.enable(timestep)
+for i in range(robot.getNumberOfDevices()):
+    dev = robot.getDeviceByIndex(i)
+    name = dev.getName()
+    
+    # Identify Steering (usually contains 'steer')
+    if "steer" in name.lower():
+        steering_motors.append(dev)
+        print(f"Found Steer: {name}")
+    
+    # Identify Drive Wheels (usually 'wheel' + 'front' or 'back')
+    elif "wheel" in name.lower():
+        drive_motors.append(dev)
+        dev.setPosition(float('inf'))
+        dev.setVelocity(0.0)
+        print(f"Found Wheel: {name}")
+    
+    # Identify Accelerometer
+    elif "accelerometer" in name.lower():
+        accel = dev
+        accel.enable(timestep)
+        print(f"Found Accel: {name}")
 
-# 4. ROBOT PHYSICAL PROFILE (Defining the "Body" for the AI)
-# This section adds significant detail for the physics calculations
-pioneer_specs = {
-    'mass': 30.0,           # kg
-    'track_width': 0.45,    # meters
-    'wheelbase': 0.4,       # meters
-    'cog_height': 0.25,     # Center of Gravity height
-    'tire_stiffness': 15000 # N/rad
+# 4. VEHICLE PHYSICAL PROFILE (Updated for a Steered Vehicle)
+vehicle_specs = {
+    'mass': 1500.0,      # Heavier for a car
+    'track_width': 1.6,
+    'wheelbase': 2.8,    # Distance between front and rear axles
+    'cog_height': 0.5,
+    'tire_stiffness': 50000
 }
 
-body = RigidBody(
-    mass=pioneer_specs['mass'], 
-    track_width=pioneer_specs['track_width'], 
-    wheelbase=pioneer_specs['wheelbase'], 
-    cog_z=pioneer_specs['cog_height']
-)
-
-tires = TireModel(cornering_stiffness=pioneer_specs['tire_stiffness'])
+body = RigidBody(mass=vehicle_specs['mass'], track_width=vehicle_specs['track_width'], 
+                 wheelbase=vehicle_specs['wheelbase'], cog_z=vehicle_specs['cog_height'])
+tires = TireModel(cornering_stiffness=vehicle_specs['tire_stiffness'])
 world = TerrainManager(default_surface="dry_asphalt")
 
 # 5. KERNEL & BRAIN ASSEMBLY
-# Initializing each specialized safety auditor
 stability_monitor = StabilityKernel(body)
 friction_monitor = FrictionKernel(body, tires, world)
-braking_monitor = BrakingKernel(max_braking_force=500)
+braking_monitor = BrakingKernel(max_braking_force=2000)
 load_monitor = LoadKernel(body)
 
-# Linking Sensors
-imu_handler = IMUSensor(body)
-encoder_handler = WheelEncoder(body)
-
-# Connecting the Action Auditor to the Safety Kernels
-auditor = ActionAuditor(
-    body, 
-    stability_monitor, 
-    friction_monitor, 
-    braking_monitor, 
-    load_monitor
-)
-
-# Predictive layer for looking ahead at potential physics violations
+auditor = ActionAuditor(body, stability_monitor, friction_monitor, braking_monitor, load_monitor)
 predictor = PredictiveKernel(auditor)
+ai = PhysicsAI(auditor=auditor, predictor=predictor, imu=IMUSensor(body), encoders=WheelEncoder(body))
 
-# Final AI Assembly
-ai = PhysicsAI(
-    auditor=auditor, 
-    predictor=predictor, 
-    imu=imu_handler, 
-    encoders=encoder_handler
-)
-
-print("--- WORLD AUDITOR: SYSTEM FULLY INITIALIZED ---")
+print("--- WORLD AUDITOR: CAR SYSTEM INITIALIZED ---")
+print("USE ARROW KEYS TO STEER AND DRIVE.")
 
 # 6. MAIN SIMULATION LOOP
 while robot.step(timestep) != -1:
     # A. Get Sensor Data
-    raw_tilt = 0.0
-    if accel:
-        # Webots Accelerometer returns [x, y, z]. 
-        # Index 1 (y) is usually the gravity vector for tilt/slope.
-        raw_tilt = accel.getValues()[1] 
+    raw_tilt = accel.getValues()[1] if accel else 0.0
     
-    # B. Define the "Intent" (What the robot wants to do)
-    v_target = 4.0   # Linear Velocity (Speed)
-    r_target = 0.0   # Turn Radius (0 = driving straight)
-    a_target = 0.5   # Expected Acceleration
+    # B. Keyboard Input to Intent
+    v_target = 0.0
+    steering_angle = 0.0 
     
-    # C. THE CRITICAL FIX: Calling 'audit_intent'
-    # This matches line 14 of your action_auditor.py exactly.
+    key = keyboard.getKey()
+    if key == Keyboard.UP:    v_target = 10.0   # Speed in m/s
+    if key == Keyboard.DOWN:  v_target = -3.0
+    if key == Keyboard.LEFT:  steering_angle = 0.4  # Radians
+    if key == Keyboard.RIGHT: steering_angle = -0.4
+
+    # C. Calculate Radius for Ackermann Steering
+    # Radius = Wheelbase / tan(SteeringAngle). 
+    if abs(steering_angle) > 0.01:
+        r_target = vehicle_specs['wheelbase'] / math.tan(abs(steering_angle))
+    else:
+        r_target = 999.0 # Driving straight
+
+    # D. THE AUDIT
     audit_results = ai.auditor.audit_intent(
         v_target=v_target,
         r_target=r_target,
-        a_target=a_target,
+        a_target=0.8,
         slope=raw_tilt
     )
     
-    # D. ACTUATION LOGIC
-    # Your code returns a dictionary: {"authorized": bool, "kernels": dict, "summary": str}
+    # E. ACTUATION LOGIC (Steering/Ackermann)
     if audit_results["authorized"]:
-        safe_speed = v_target
+        # Set the steering angle
+        if steering_motors:
+            steering_motors.setPosition(steering_angle)
+        # Apply velocity to drive motors
+        for m in drive_motors:
+            m.setVelocity(v_target)
     else:
-        # If the AI vetos the move, we stop for safety
-        safe_speed = 0.0
+        # AI Override: Safety Stop
+        for m in drive_motors:
+            m.setVelocity(0.0)
         if robot.getTime() % 1.0 < 0.05:
-            print(f"AI VETO: {audit_results['summary']}")
+            print(f"!!! AI VETO: {audit_results['summary']}")
 
-    # Apply to all 4 Pioneer 3-AT motors
-    for motor in motors:
-        motor.setVelocity(safe_speed)
-
-    # Telemetry
+    # F. Telemetry
     if robot.getTime() % 2.0 < 0.05:
-        print(f"STATUS: {'SAFE' if audit_results['authorized'] else 'DANGER'}")
+        status = "SAFE" if audit_results["authorized"] else "DANGER"
+        print(f"[{status}] Speed: {v_target}m/s | Steer Angle: {steering_angle:.2f} | Tilt: {raw_tilt:.2f}")
