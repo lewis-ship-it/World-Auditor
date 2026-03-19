@@ -1,7 +1,7 @@
 import os
 import sys
 import math
-from controllers import Robot, Keyboard
+from controller import Robot, Keyboard, Node
 
 # 1. PATH CONFIGURATION
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
@@ -26,46 +26,48 @@ except ImportError as e:
     print(f"CRITICAL: Missing core files. {e}")
     sys.exit(1)
 
-# 3. WEBOTS HARDWARE & KEYBOARD INITIALIZATION (CAR/STEERING VERSION)
+# 3. WEBOTS HARDWARE & KEYBOARD INITIALIZATION
 robot = Robot()
 timestep = int(robot.getBasicTimeStep())
 keyboard = Keyboard()
 keyboard.enable(timestep)
 
-print("--- SCANNING BMW X5 FOR DEVICES ---")
+print("--- SCANNING BMW X5 FOR MOTORS ---")
 steering_motors = []
 drive_motors = []
 accel = None
 
+# DYNAMIC DISCOVERY: We only grab MOTORS to prevent sensor-related crashes
 for i in range(robot.getNumberOfDevices()):
     dev = robot.getDeviceByIndex(i)
     name = dev.getName()
+    d_type = dev.getNodeType()
     
-    # Identify Steering (usually contains 'steer')
-    if "steer" in name.lower():
+    # Check if the device is actually a motor (Rotational = 41)
+    is_motor = d_type in [Node.ROTATIONAL_MOTOR, Node.LINEAR_MOTOR]
+
+    if "steer" in name.lower() and is_motor:
         steering_motors.append(dev)
-        print(f"Found Steer: {name}")
+        print(f"Found Steer Motor: {name}")
     
-    # Identify Drive Wheels (usually 'wheel' + 'front' or 'back')
-    elif "wheel" in name.lower():
+    elif "wheel" in name.lower() and is_motor:
         drive_motors.append(dev)
-        dev.setPosition(float('inf'))
+        dev.setPosition(float('inf')) # Set to velocity control mode
         dev.setVelocity(0.0)
-        print(f"Found Wheel: {name}")
+        print(f"Found Drive Motor: {name}")
     
-    # Identify Accelerometer
     elif "accelerometer" in name.lower():
         accel = dev
         accel.enable(timestep)
         print(f"Found Accel: {name}")
 
-# 4. VEHICLE PHYSICAL PROFILE (Updated for a Steered Vehicle)
+# 4. VEHICLE PHYSICAL PROFILE (Updated for BMW X5/Ackermann)
 vehicle_specs = {
-    'mass': 1500.0,      # Heavier for a car
+    'mass': 2200.0,      # Corrected for a BMW X5
     'track_width': 1.6,
-    'wheelbase': 2.8,    # Distance between front and rear axles
-    'cog_height': 0.5,
-    'tire_stiffness': 50000
+    'wheelbase': 2.9,    
+    'cog_height': 0.6,
+    'tire_stiffness': 40000
 }
 
 body = RigidBody(mass=vehicle_specs['mass'], track_width=vehicle_specs['track_width'], 
@@ -76,7 +78,7 @@ world = TerrainManager(default_surface="dry_asphalt")
 # 5. KERNEL & BRAIN ASSEMBLY
 stability_monitor = StabilityKernel(body)
 friction_monitor = FrictionKernel(body, tires, world)
-braking_monitor = BrakingKernel(max_braking_force=2000)
+braking_monitor = BrakingKernel(max_braking_force=3000)
 load_monitor = LoadKernel(body)
 
 auditor = ActionAuditor(body, stability_monitor, friction_monitor, braking_monitor, load_monitor)
@@ -93,45 +95,47 @@ while robot.step(timestep) != -1:
     
     # B. Keyboard Input to Intent
     v_target = 0.0
-    steering_angle = 0.0 
+    steer_target = 0.0 
     
     key = keyboard.getKey()
-    if key == Keyboard.UP:    v_target = 10.0   # Speed in m/s
+    if key == Keyboard.UP:    v_target = 10.0   # Target velocity in m/s
     if key == Keyboard.DOWN:  v_target = -3.0
-    if key == Keyboard.LEFT:  steering_angle = 0.4  # Radians
-    if key == Keyboard.RIGHT: steering_angle = -0.4
+    if key == Keyboard.LEFT:  steer_target = 0.4  # Turn left
+    if key == Keyboard.RIGHT: steer_target = -0.4 # Turn right
 
     # C. Calculate Radius for Ackermann Steering
-    # Radius = Wheelbase / tan(SteeringAngle). 
-    if abs(steering_angle) > 0.01:
-        r_target = vehicle_specs['wheelbase'] / math.tan(abs(steering_angle))
+    # If driving straight, radius is effectively infinite (999.0)
+    if abs(steer_target) > 0.01:
+        r_target = vehicle_specs['wheelbase'] / math.tan(abs(steer_target))
     else:
-        r_target = 999.0 # Driving straight
+        r_target = 999.0
 
     # D. THE AUDIT
+    # Runs the intent through Stability, Friction, and Braking kernels
     audit_results = ai.auditor.audit_intent(
         v_target=v_target,
         r_target=r_target,
-        a_target=0.8,
+        a_target=1.0, # Target acceleration for calculations
         slope=raw_tilt
     )
     
-    # E. ACTUATION LOGIC (Steering/Ackermann)
+    # E. ACTUATION
     if audit_results["authorized"]:
-        # Set the steering angle
-        if steering_motors:
-            steering_motors.setPosition(steering_angle)
-        # Apply velocity to drive motors
-        for m in drive_motors:
-            m.setVelocity(v_target)
+        # Execute movement if safe
+        for s_motor in steering_motors:
+            s_motor.setPosition(steer_target)
+        for d_motor in drive_motors:
+            d_motor.setVelocity(v_target)
     else:
-        # AI Override: Safety Stop
-        for m in drive_motors:
-            m.setVelocity(0.0)
+        # AI OVERRIDE: Emergency Stop if unsafe
+        for d_motor in drive_motors:
+            d_motor.setVelocity(0.0)
+        
+        # Periodic Veto Reporting
         if robot.getTime() % 1.0 < 0.05:
             print(f"!!! AI VETO: {audit_results['summary']}")
 
-    # F. Telemetry
-    if robot.getTime() % 2.0 < 0.05:
-        status = "SAFE" if audit_results["authorized"] else "DANGER"
-        print(f"[{status}] Speed: {v_target}m/s | Steer Angle: {steering_angle:.2f} | Tilt: {raw_tilt:.2f}")
+    # F. TELEMETRY (Corrected Indentation)
+    if robot.getTime() % 1.5 < 0.05:
+        status = "SAFE" if audit_results["authorized"] else "VETOED"
+        print(f"[{status}] V:{v_target}m/s | Steer:{steer_target:.2f} | Tilt:{raw_tilt:.2f}")
