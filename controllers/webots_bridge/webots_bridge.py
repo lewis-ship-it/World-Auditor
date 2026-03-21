@@ -22,19 +22,21 @@ from alignment_core.world_model.terrain_manager import TerrainManager
 from alignment_core.sensors.imu import IMUSensor
 from alignment_core.sensors.encoder import WheelEncoder
 
-# --- WEBOTS INIT ---
+from alignment_core.navigation.heading_estimator import HeadingEstimator
+from alignment_core.navigation.pure_pursuit import pure_pursuit_control
+from alignment_core.navigation.occupancy_grid import OccupancyGrid
+
+# --- INIT ---
 robot = Robot()
-prev_steer_error = 0.0
-Kp = 0.40  # Turning strength
-Kd = 0.20  # Damping (Fixes the jerky/shaking motion)
 timestep = int(robot.getBasicTimeStep())
+
 keyboard = Keyboard()
 keyboard.enable(timestep)
 
 # --- DEVICES ---
 steering_motors = []
 drive_motors = []
-accel = None
+accel, gps, lidar = None, None, None
 
 for i in range(robot.getNumberOfDevices()):
     dev = robot.getDeviceByIndex(i)
@@ -51,179 +53,175 @@ for i in range(robot.getNumberOfDevices()):
     elif "accelerometer" in name:
         accel = dev
         accel.enable(timestep)
-    elif "inertial unit" in name: 
-        imu = dev; imu.enable(timestep)
-    elif "camera" in name: 
-        camera = dev; camera.enable(timestep)
-    elif "lidar" in name: 
-        lidar = dev; lidar.enable(timestep)
-    elif "gps" in name: 
-        gps = dev; gps.enable(timestep)
-    elif "distance sensor" in name:
-        distance_sensor = dev; distance_sensor.enable(timestep)
+    elif "gps" in name:
+        gps = dev
+        gps.enable(timestep)
+    elif "lidar" in name or "hokuyo" in name:
+        lidar = dev
+        lidar.enable(timestep)
 
-# --- GPS ---
-gps = robot.getDevice("gps")
-if gps:
-    gps.enable(timestep)
-
-# --- DISTANCE SENSOR (OBSTACLE DETECTION) ---
-distance_sensor = robot.getDevice("distance sensor")
-if distance_sensor:
-    distance_sensor.enable(timestep)
-
-# --- VEHICLE ---
+# --- VEHICLE SETUP ---
 vehicle_specs = {
-    'mass': 2200.0,
-    'track_width': 1.6,
-    'wheelbase': 2.9,
-    'cog_height': 0.6,
-    'tire_stiffness': 40000
+    'mass': 2200.0, 'track_width': 1.6, 'wheelbase': 2.9,
+    'cog_height': 0.6, 'tire_stiffness': 40000
 }
 
-body = RigidBody(mass=vehicle_specs['mass'], track_width=vehicle_specs['track_width'], 
-                 wheelbase=vehicle_specs['wheelbase'], cog_z=vehicle_specs['cog_height'])
+body = RigidBody(
+    mass=vehicle_specs['mass'],
+    track_width=vehicle_specs['track_width'],
+    wheelbase=vehicle_specs['wheelbase'],
+    cog_z=vehicle_specs['cog_height']
+)
+
 tires = TireModel(cornering_stiffness=vehicle_specs['tire_stiffness'])
 world = TerrainManager(default_surface="dry_asphalt")
-
-# --- AI ---
-stability = StabilityKernel(body)
-friction = FrictionKernel(body, tires, world)
-braking = BrakingKernel(max_braking_force=3000)
-load = LoadKernel(body)
-auditor = ActionAuditor(body, stability, friction, braking, load)
+auditor = ActionAuditor(
+    body, 
+    StabilityKernel(body), 
+    FrictionKernel(body, tires, world), 
+    BrakingKernel(3000), 
+    LoadKernel(body)
+)
 predictor = PredictiveKernel(auditor)
-ai = PhysicsAI(auditor=auditor, predictor=predictor, imu=IMUSensor(body), encoders=WheelEncoder(body))
 
-# --- CONTROL STATE ---
+# --- NAVIGATION SYSTEMS ---
+heading_estimator = HeadingEstimator()
+grid = OccupancyGrid(size=200, resolution=0.5)
 waypoints = []
 wp_index = 0
 autopilot = False
-last_toggle = False
-last_save = False
+prev_steer = 0.0
 
-# PD Constants for Steering Stability
-prev_steer_error = 0.0
-Kp = 0.45 
-Kd = 0.15 
+print("COMMANDS: A=Autopilot | P=Save Waypoint | V=Save Map Image")
 
-print("A = toggle autopilot | P = save waypoint | Arrows = Manual Drive")
+# --- UTILITIES ---
+def lidar_avoidance(lidar, threshold=5.0):
+    if lidar is None: return 0.0, False
+    ranges = lidar.getRangeImage()
+    if not ranges: return 0.0, False
+    
+    n = len(ranges)
+    left = ranges[:n//3]
+    center = ranges[n//3:2*n//3]
+    right = ranges[2*n//3:]
+    
+    min_c = min(center)
+    # Full stop if blocked everywhere
+    if min_c < threshold and min(left) < threshold and min(right) < threshold:
+        return 0.0, True 
+    
+    # Steering avoidance
+    if min_c < threshold:
+        return (0.4 if min(left) > min(right) else -0.4), False
+    return 0.0, False
 
-# --- LOOP ---
+# --- MAIN LOOP ---
 while robot.step(timestep) != -1:
     key = keyboard.getKey()
-    # --- ADD THIS TO START OF LOOP ---
-reasoning = "Idle" # Prevents the NameError
-
-# --- UPDATE AUTOPILOT CALCULATION ---
-if autopilot and len(waypoints) > 0:
-    # ... (Your GPS/Distance logic here) ...
     
-   # --- REPLACE YOUR STEERING CALCULATION WITH THIS ---
-    # 1. Calculate the raw error
-    angle_error = math.atan2(dy, dx)
-    
-    # 2. Calculate the 'Derivative' (The change in error)
-    # This acts as a brake to stop the wheels from snapping too fast
-    error_diff = (angle_error - prev_steer_error) / (timestep / 1000.0)
-    
-    # 3. Apply the PD Formula
-    # Kp = How hard it turns | Kd = How much it damps the shaking
-    steer_target = (Kp * angle_error) + (Kd * error_diff)
-    
-    # 4. Limit the physical steering rack
-    steer_target = max(-0.5, min(0.5, steer_target))
-    
-    # 5. Save error for the next frame
-    prev_steer_error = angle_error
-    
-    reasoning = f"Tracking Waypoint {wp_index}"
-
-    # --- TOGGLE AUTOPILOT ---
+    # --- INPUT HANDLING ---
     if key == ord('A'):
-        if not last_toggle:
-            autopilot = not autopilot
-            print("AUTOPILOT:", autopilot)
-        last_toggle = True
-    else:
-        last_toggle = False
-
-    # --- SAVE WAYPOINT ---
-    if key == ord('P'):
-        if not last_save:
-            pos = gps.getValues() if gps else [0, 0, 0]
-            wp = (pos[0], pos[2])
-            waypoints.append(wp)
-            print("Saved waypoint:", wp)
-        last_save = True
-    else:
-        last_save = False
-
-    raw_tilt = accel.getValues()[1] if accel else 0.0
+        autopilot = not autopilot
+        print(f"AUTOPILOT: {'ENABLED' if autopilot else 'DISABLED'}")
+    
+    if key == ord('P') and gps:
+        pos = gps.getValues()
+        waypoints.append((pos[0], pos[2]))
+        print(f"Waypoint Saved: {len(waypoints)} at ({pos[0]:.2f}, {pos[2]:.2f})")
+    
+   
     v_target, steer_target, r_target = 0.0, 0.0, 999.0
 
-    # =========================
-    # 1. AUTOPILOT CALCULATION
-    # =========================
-    if autopilot and len(waypoints) > 0:
-        pos = gps.getValues() if gps else [0, 0, 0]
-        x, z = pos[0], pos[2]
-        target = waypoints[wp_index]
-        dx, dy = target[0] - x, target[1] - z
-        distance = math.hypot(dx, dy)
+    if gps:
+        pos = gps.getValues()
+        current_yaw = heading_estimator.update(pos)
+        grid.update(lidar, pos, current_yaw)
 
-        if distance < 2.5 and wp_index < len(waypoints) - 1:
-            wp_index += 1
-            print("→ Next waypoint:", wp_index)
+        # --- AUTOPILOT LOGIC ---
+        if autopilot and wp_index < len(waypoints):
+            current_pos = (pos[0], pos[2])
+            target_wp = waypoints[wp_index]
+            
+            # Distance to current target waypoint
+            dist_to_wp = math.hypot(target_wp[0] - pos[0], target_wp[1] - pos[2])
+            
+            # Waypoint Progression
+            if dist_to_wp < 2.5:
+                wp_index += 1
+                print(f"Reached Waypoint! Moving to index: {wp_index}")
 
-        # PD Control for Smooth Steering
-        angle_error = math.atan2(dy, dx)
-        error_diff = (angle_error - prev_steer_error) / (timestep / 1000.0)
-        steer_target = (Kp * angle_error) + (Kd * error_diff)
-        steer_target = max(-0.5, min(0.5, steer_target))
-        prev_steer_error = angle_error
+            if wp_index < len(waypoints):
+                # Calculate Pure Pursuit Steering
+                steer_pp, _ = pure_pursuit_control(
+                    current_pos=current_pos,
+                    heading=current_yaw,
+                    path=waypoints[wp_index:], 
+                    wheelbase=vehicle_specs['wheelbase'],
+                    lookahead=5.0
+                )
+                steer_target = steer_pp
 
-        r_target = vehicle_specs['wheelbase'] / math.tan(abs(steer_target)) if abs(steer_target) > 0.02 else 999.0
-        v_target = min(8.0, predictor.find_optimal_velocity(radius=r_target)["max_safe_velocity"])
+            # Obstacle Avoidance Override
+            avoid_steer, should_stop = lidar_avoidance(lidar)
+            if should_stop:
+                v_target = 0.0
+            else:
+                steer_target += avoid_steer
+                
+                # Calculate target radius for physics-based velocity
+                if abs(steer_target) > 0.01:
+                    r_target = vehicle_specs['wheelbase'] / math.tan(abs(steer_target))
+                else:
+                    r_target = 999.0
 
-        if distance_sensor and distance_sensor.getValue() < 800:
-            print("⚠️ OBSTACLE DETECTED")
-            v_target = 0.0
+                # Determine safe velocity based on physics constraints
+                safe_v_data = predictor.find_optimal_velocity(radius=r_target)
+                v_target = min(10.0, safe_v_data["max_safe_velocity"])
+                
+                # Maintain minimum velocity for heading estimation if not blocked
+                if v_target < 0.5:
+                    v_target = 1.0
 
-    # =========================
-    # 2. MANUAL OVERRIDE (Always Active)
-    # =========================
-    if key == Keyboard.UP:    v_target = 10.0
-    elif key == Keyboard.DOWN:  v_target = -3.0
-    
-    if key == Keyboard.LEFT:  
-        steer_target = 0.4
-        autopilot = False # Disable auto if manual steer is detected
-    elif key == Keyboard.RIGHT: 
-        steer_target = -0.4
-        autopilot = False
+        # --- MANUAL CONTROL ---
+        elif not autopilot:
+            if key == Keyboard.UP:
+                v_target = 10.0
+            elif key == Keyboard.DOWN:
+                v_target = -3.0
+            
+            if key == Keyboard.LEFT:
+                steer_target = 0.5
+            elif key == Keyboard.RIGHT:
+                steer_target = -0.5
+            
+            if abs(steer_target) > 0.01:
+                r_target = vehicle_specs['wheelbase'] / math.tan(abs(steer_target))
 
-    # Re-calculate radius if manual input is used
-    if not autopilot:
-        r_target = vehicle_specs['wheelbase'] / math.tan(abs(steer_target)) if abs(steer_target) > 0.01 else 999.0
-
-    # =========================
-    # 3. SAFETY & ACTUATION
-    # =========================
-    audit = auditor.audit_intent(v_target=v_target, r_target=r_target, a_target=1.0, slope=raw_tilt)
-    if not audit["authorized"]: 
+    # --- SAFETY AUDIT ---
+    audit = auditor.audit_intent(
+        v_target=v_target, 
+        r_target=r_target, 
+        a_target=1.0, 
+        slope=0.0
+    )
+    if not audit["authorized"]:
         v_target = 0.0
 
-    for s in steering_motors: 
+    # --- STEERING SMOOTHING & CLAMPING ---
+    # Limits rate of change to avoid motor errors and jerky motion
+    max_rate = 0.04
+    steer_target = max(prev_steer - max_rate, min(prev_steer + max_rate, steer_target))
+    
+    # Final clamp to BmwX5 hardware limits (~31.5 degrees)
+    steer_target = max(-0.55, min(0.55, steer_target))
+    prev_steer = steer_target
+
+    # --- ACTUATION ---
+    for s in steering_motors:
         s.setPosition(steer_target)
-    for d in drive_motors: 
+    for d in drive_motors:
         d.setVelocity(v_target)
 
-    if robot.getTime() % 1.5 < 0.05:
-        mode = "AUTO" if autopilot else "MAN"
-        print(f"--- AI LOG [{robot.getTime():.1f}s] ---")
-        print(f"  Decision: {reasoning}")
-        print(f"  Target V: {v_target:.1f} m/s | Steer: {steer_target:.2f}")
-        if not audit["authorized"]:
-            print(f"  Stability Risk: {audit.get('stability_score', 'N/A')}")
-        print("-" * 25)
+    # --- DEBUG CONSOLE ---
+    if robot.getTime() % 1.0 < (timestep / 1000.0):
+        print(f"[Status] Auto: {autopilot} | Speed: {v_target:.2f} | Steer: {steer_target:.2f} | WP: {wp_index}/{len(waypoints)}")
