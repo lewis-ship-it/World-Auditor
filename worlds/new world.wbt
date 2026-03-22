@@ -4,12 +4,14 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/bmw/BmwX5Simple.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/devices/hokuyo/protos/HokuyoUrg04lx.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/nvidia/jetbot/protos/JetBotRaspberryPiCamera.proto"
 
 WorldInfo {
 }
 Viewpoint {
-  orientation 0.12442532521958549 -0.10140554578666468 -0.9870335626146199 4.496434906673367
-  position 2.9327490835344814 -9.389163784693412 2.0144977892806795
+  orientation -0.14965784078124536 0.04830624309360574 0.9875571059796375 2.5244531895478293
+  position 5.899614366468621 -4.711605129690444 3.3927563891323955
 }
 TexturedBackground {
 }
@@ -20,4 +22,12 @@ RectangleArena {
 }
 BmwX5Simple {
   controller "webots_bridge"
+  sensorsSlotFront [
+    HokuyoUrg04lx {
+    }
+  ]
+  sensorsSlotTop [
+    JetBotRaspberryPiCamera {
+    }
+  ]
 }
