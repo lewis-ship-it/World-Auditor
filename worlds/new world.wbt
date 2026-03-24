@@ -1,17 +1,14 @@
 #VRML_SIM R2025a utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/bmw/BmwX5Simple.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/devices/hokuyo/protos/HokuyoUrg04lx.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/nvidia/jetbot/protos/JetBotRaspberryPiCamera.proto"
+EXTERNPROTO "C:/Users/Administrator/Desktop/World_auditor/worlds/protos/AdvancedAISUV.proto"
 
 WorldInfo {
+  basicTimeStep 10
 }
 Viewpoint {
-  orientation -0.14965784078124536 0.04830624309360574 0.9875571059796375 2.5244531895478293
-  position 5.899614366468621 -4.711605129690444 3.3927563891323955
+  orientation 0.012498842600333179 0.01153689981291764 -0.9998553289733264 1.6509405447192886
+  position 1.8234961796625209 14.155366460376056 1.0243442230062572
 }
 TexturedBackground {
 }
@@ -20,14 +17,17 @@ TexturedBackgroundLight {
 RectangleArena {
   floorSize 30 30
 }
-BmwX5Simple {
-  controller "webots_bridge"
-  sensorsSlotFront [
-    HokuyoUrg04lx {
-    }
-  ]
-  sensorsSlotTop [
-    JetBotRaspberryPiCamera {
-    }
-  ]
+AdvancedAISUV {
+  hidden position_0_0 8.551349170058625e-12
+  hidden position2_0_0 -0.0004428756637996737
+  hidden position_0_1 -9.842217304935231e-12
+  hidden position2_0_1 -0.0004428754986727056
+  hidden position_0_2 -9.063560302280393e-08
+  hidden position_0_3 -9.063560391098235e-08
+  hidden rotation_1 4.275674585029311e-12 0.9999999999999998 -1.930869029226152e-08 0.0004428756637211332
+  hidden rotation_2 4.921108652467614e-12 -0.9999999999999998 2.2223440162217815e-08 0.00044287549826897606
+  hidden rotation_3 0 1 0 8.940696716308595e-08
+  hidden rotation_4 0 -0.9999999999999999 0 8.940696716308595e-08
+  translation 0.01616759669912347 7.122390454617715e-10 0.4511335751114237
+  rotation 2.9267151403414627e-08 0.999999999999997 6.9723726153569e-08 0.018893013347299578
 }

@@ -4,3 +4,4 @@ platform_benchmarks.csv
 __pycache__/
 .mp4
 *.csv
+.wbt

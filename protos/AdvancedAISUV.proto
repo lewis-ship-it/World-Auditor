@@ -1,0 +1,170 @@
+#VRML_SIM R2023b utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/abstract/AckermannVehicle.proto"
+
+PROTO AdvancedAISUV [
+  field SFVec3f    translation 0 0.5 0
+  field SFRotation rotation    0 1 0 0
+  field SFString   name "AI_SUV"
+]
+{
+  AckermannVehicle {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    controller "vehicle_controller"
+    
+    # --- VEHICLE GEOMETRY ---
+    wheelbase 3.4
+    trackFront 2.0
+    trackRear 2.0
+
+    # --- SUSPENSION SETTINGS ---
+    # High front stiffness stops sinking; lower rear stiffness stops floating.
+    suspensionFrontSpringConstant 400000
+    suspensionFrontDampingConstant 10000
+    suspensionRearSpringConstant 150000
+    suspensionRearDampingConstant 8000
+
+    # --- PHYSICAL PROPERTIES ---
+    boundingObject Transform {
+      translation 0.5 0 0.55
+      children [
+        Box {
+          size 4.5 1.8 1.0 [cite: 3]
+        }
+      ]
+    }
+    physics Physics {
+      density -1
+      mass 1800 
+      centerOfMass [ 1.6 0 0.1 ] 
+    }
+
+    extensionSlot [
+      # =====================
+      # CHASSIS VISUAL
+      # =====================
+      Transform {
+        translation 0 0.5 0 [cite: 4]
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.1 0.1 0.12 [cite: 4]
+              metalness 0.7 [cite: 4]
+              roughness 0.3 [cite: 4]
+            }
+            geometry Box { size 4.5 1.0 2.0 } [cite: 5]
+          }
+        ]
+      }
+
+      # =====================
+      # SENSORS
+      # =====================
+      Camera {
+        name "front_camera"
+        width 1280 [cite: 6]
+        height 720 [cite: 6]
+        fieldOfView 1.2 [cite: 6]
+        translation 2.2 0.8 0 [cite: 6]
+      }
+      Camera {
+        name "top_camera"
+        width 800 [cite: 6]
+        height 600 [cite: 6]
+        fieldOfView 1.5 [cite: 6]
+        translation 0 1.5 0 [cite: 6]
+        rotation 1 0 0 -1.57 [cite: 6]
+      }
+      Lidar {
+        name "lidar"
+        translation 0 1.2 0 [cite: 7]
+        horizontalResolution 720 [cite: 7]
+        numberOfLayers 16 [cite: 7]
+        fieldOfView 6.28 [cite: 7]
+        maxRange 100 [cite: 7]
+      }
+      GPS { name "gps" }
+      InertialUnit { name "imu" }
+
+      # --- DISTANCE SENSORS ---
+      DistanceSensor { name "ds_front" translation 2.3 0.2 0 } [cite: 8]
+      DistanceSensor { name "ds_left"  translation 0 0.2 1.2 rotation 0 1 0 1.57 } [cite: 8]
+      DistanceSensor { name "ds_right" translation 0 0.2 -1.2 rotation 0 1 0 -1.57 } [cite: 8]
+      DistanceSensor { name "ds_rear"  translation -2.3 0.2 0 rotation 0 1 0 3.14 } [cite: 8]
+
+      # =====================
+      # WHEELS (RETENTION OF ORIGINALS)
+      # =====================
+      # FRONT LEFT
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 1 0 anchor 1.7 0.5 1.0 } [cite: 9]
+        device [ RotationalMotor { name "steer_fl" } ] [cite: 9]
+        endPoint Solid {
+          translation 1.7 0.5 1.0 [cite: 9]
+          children [
+            HingeJoint {
+              jointParameters HingeJointParameters { axis 0 0 1 } [cite: 10]
+              device [ RotationalMotor { name "wheel_fl" } ] [cite: 10]
+              endPoint DEF WHEEL_SOLID Solid {
+                children [
+                  Transform {
+                    rotation 1 0 0 1.57 [cite: 11]
+                    children [ Shape { geometry Cylinder { radius 0.5 height 0.4 } } ] [cite: 11]
+                  }
+                ]
+                boundingObject Sphere { radius 0.5 } [cite: 11]
+                physics Physics { mass 20 } [cite: 12]
+              }
+            }
+          ]
+        }
+      }
+
+      # FRONT RIGHT
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 1 0 anchor 1.7 0.5 -1.0 } [cite: 13]
+        device [ RotationalMotor { name "steer_fr" } ] [cite: 13]
+        endPoint Solid {
+          translation 1.7 0.5 -1.0 [cite: 13]
+          children [
+            HingeJoint {
+              jointParameters HingeJointParameters { axis 0 0 1 } [cite: 13]
+              device [ RotationalMotor { name "wheel_fr" } ] [cite: 14]
+              endPoint Solid {
+                children [ Transform { rotation 1 0 0 1.57 children [ Shape { geometry Cylinder { radius 0.5 height 0.4 } } ] } ] [cite: 15]
+                boundingObject Sphere { radius 0.5 } [cite: 15]
+                physics Physics { mass 20 } [cite: 15]
+              }
+            }
+          ]
+        }
+      }
+
+      # REAR LEFT
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 0 1 anchor -1.7 0.5 1.0 } [cite: 16]
+        device [ RotationalMotor { name "wheel_rl" } ] [cite: 16]
+        endPoint Solid {
+          translation -1.7 0.5 1.0 [cite: 16]
+          children [ Transform { rotation 1 0 0 1.57 children [ Shape { geometry Cylinder { radius 0.5 height 0.4 } } ] } ] [cite: 16]
+          boundingObject Sphere { radius 0.5 } [cite: 16]
+          physics Physics { mass 20 } [cite: 16]
+        }
+      }
+
+      # REAR RIGHT
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 0 1 anchor -1.7 0.5 -1.0 } [cite: 17]
+        device [ RotationalMotor { name "wheel_rr" } ] [cite: 17]
+        endPoint Solid {
+          translation -1.7 0.5 -1.0 [cite: 17]
+          children [ Transform { rotation 1 0 0 1.57 children [ Shape { geometry Cylinder { radius 0.5 height 0.4 } } ] } ] [cite: 18]
+          boundingObject Sphere { radius 0.5 } [cite: 18]
+          physics Physics { mass 20 } [cite: 18]
+        }
+      }
+    ]
+  }
+}
