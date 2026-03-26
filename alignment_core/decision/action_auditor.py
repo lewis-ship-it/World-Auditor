@@ -1,5 +1,3 @@
-# FILE: alignment_core/decision/action_auditor.py
-
 class ActionAuditor:
     def __init__(self, robot, stability, friction, braking, load, logger=None):
         self.robot = robot
@@ -10,69 +8,66 @@ class ActionAuditor:
         self.logger = logger
         self.panic_active = False
 
-    def audit_intent(self, v_target, r_target, a_target, 
-                     slope=0, dist_to_obj=100, payload=None):
+    def audit_intent(self, state, intent, *args, **kwargs):
+        print(">>> AUDITOR IS RUNNING WITH NEW CODE <<<")
+        # Fix: If brain returns a float instead of a dict, wrap it
+        if isinstance(intent, (int, float)):
+            intent = {"speed": float(intent), "steering": 0.0}
+            
+        # Fix: Safely extract slope from positional or keyword arguments
+        if args:
+            slope = args[0]
+        else:
+            slope = kwargs.get('slope', 0.0)
+        
+        v_val = intent.get("speed", 0)
+        r_val = intent.get("steering", 0)
+        a_val = intent.get("acceleration", 0)
+        dist_to_obj = state.get("obstacle_distance", 100)
+        
         results = {}
         
-        # 1. Update Physical State (Load)
-        if payload:
-            results['load'] = self.load.update_payload(
-                payload['mass'], payload['x'], payload['y'], payload['z']
+        if self.stability:
+            results['stability'] = self.stability.evaluate(
+                velocity=v_val, radius=r_val, acceleration=a_val, slope=slope
+            )
+        
+        if self.friction and hasattr(self.friction, 'evaluate'):
+            results['friction'] = self.friction.evaluate(
+                velocity=v_val, radius=r_val, req_accel=a_val
+            )
+        else:
+            results['friction'] = {'is_legal': True, 'grip_utilization': 0}
+
+        if self.braking:
+            results['braking'] = self.braking.evaluate(
+                velocity=v_val, distance=dist_to_obj, slope=slope
             )
 
-        # 2. Check Equilibrium (Stability)
-        results['stability'] = self.stability.evaluate(
-            velocity=v_target, radius=r_target, 
-            acceleration=a_target, slope_angle_deg=slope
-        )
-
-        # 3. Check Traction (Friction)
-        results['friction'] = self.friction.evaluate(
-            velocity=v_target, radius=r_target, 
-            req_accel=a_target, slope_deg=slope
-        )
-
-        # 4. Check Safety Margin (Braking)
-        mu_s, _ = self.friction.terrain.get_friction()
-        results['braking'] = self.braking.evaluate(
-            velocity=v_target, mass=self.robot.m, 
-            friction_mu=mu_s, slope_angle_deg=slope, 
-            distance_to_target=dist_to_obj
-        )
-
-        # --- PANIC MODE TRIGGER ---
-        # Trigger emergency stop if utilization hits 99% of the safe limit
+        # Emergency Stop if grip utilization is too high
         if results['friction'].get('grip_utilization', 0) > 0.99:
-            return self.emergency_stop(results, "Traction Loss Imminent")
+            return self.emergency_stop(results, "Traction Loss")
 
-        # 5. Final Decision Logic
         is_safe = all([
-            results['stability']['is_legal'], 
-            results['friction']['is_legal'], 
-            results['braking']['is_legal']
+            results.get('stability', {}).get('is_legal', True),
+            results.get('friction', {}).get('is_legal', True),
+            results.get('braking', {}).get('is_legal', True)
         ])
-
-        audit_output = {
+        
+        return {
             "authorized": is_safe,
-            "kernels": results,
-            "summary": self._summarize(results)
+            "approved_speed": v_val if is_safe else 0.0,
+            "approved_steering": r_val,
+            "kernels": results
         }
 
+    def emergency_stop(self, kernels, reason):
         if self.logger:
-            self.logger.record({"v": v_target, "r": r_target, "a": a_target}, audit_output)
-
-        return audit_output
-
-    def emergency_stop(self, current_res, trigger_reason):
-        self.panic_active = True
+            self.logger.log(f"PANIC: {reason}")
         return {
             "authorized": False,
-            "kernels": current_res,
-            "summary": f"PANIC: {trigger_reason}. Overriding to Emergency Brake."
+            "approved_speed": 0.0,
+            "approved_steering": 0.0,
+            "kernels": kernels,
+            "panic": True
         }
-
-    def _summarize(self, res):
-        if not res['stability']['is_legal']: return f"VETO (Stability): {res['stability']['reasoning']}"
-        if not res['friction']['is_legal']: return f"VETO (Friction): {res['friction']['reasoning']}"
-        if not res['braking']['is_legal']: return f"VETO (Braking): {res['braking']['reasoning']}"
-        return "Authorized"

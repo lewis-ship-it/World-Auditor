@@ -1,6 +1,5 @@
 #VRML_SIM R2023b utf8
 
-# FIXED: Added the specific wheel declaration Webots was asking for
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/abstract/VehicleWheel.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/abstract/AckermannVehicle.proto"
 
@@ -22,6 +21,7 @@ PROTO AdvancedAISUV [
     trackRear 2.0
 
     # --- SUSPENSION SETTINGS ---
+    # High front stiffness stops sinking; lower rear stiffness stops floating.
     suspensionFrontSpringConstant 400000
     suspensionFrontDampingConstant 10000
     suspensionRearSpringConstant 150000
@@ -37,7 +37,7 @@ PROTO AdvancedAISUV [
       ]
     }
     physics Physics {
-      # FIXED: Removed 'density -1' to resolve the mass conflict warning
+      # mass is 1800; density removed to fix the warning conflict
       mass 1800 
       centerOfMass [ 1.6 0 0.1 ] 
     }
@@ -80,51 +80,89 @@ PROTO AdvancedAISUV [
         name "imu"
       }
 
-      # FRONT LEFT
+      # --- FRONT LEFT WHEEL ---
       HingeJoint {
-        jointParameters HingeJointParameters { axis 0 1 0 anchor 1.7 0.5 1.0 }
-        device [ RotationalMotor { name "steer_fl" } ]
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor 1.7 0.5 1.0
+        }
+        device [
+          RotationalMotor {
+            name "steer_fl"
+          }
+        ]
         endPoint VehicleWheel {
           name "wheel_fl"
           wheelRadius 0.5
           thickness 0.4
-          physics Physics { mass 20 }
+          physics Physics {
+            mass 20
+          }
         }
       }
 
-      # FRONT RIGHT
+      # --- FRONT RIGHT WHEEL ---
       HingeJoint {
-        jointParameters HingeJointParameters { axis 0 1 0 anchor 1.7 0.5 -1.0 }
-        device [ RotationalMotor { name "steer_fr" } ]
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor 1.7 0.5 -1.0
+        }
+        device [
+          RotationalMotor {
+            name "steer_fr"
+          }
+        ]
         endPoint VehicleWheel {
           name "wheel_fr"
           wheelRadius 0.5
           thickness 0.4
-          physics Physics { mass 20 }
+          physics Physics {
+            mass 20
+          }
         }
       }
 
-      # REAR LEFT
+      # --- REAR LEFT WHEEL ---
       HingeJoint {
-        jointParameters HingeJointParameters { axis 0 0 1 anchor -1.7 0.5 1.0 }
-        device [ RotationalMotor { name "wheel_rl" } ]
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor -1.7 0.5 1.0
+        }
+        device [
+          RotationalMotor {
+            # unique name for driving motor
+            name "wheel_rl"
+          }
+        ]
         endPoint VehicleWheel {
-          name "wheel_rl"
+          name "wheel_rl_solid"
           wheelRadius 0.5
           thickness 0.4
-          physics Physics { mass 20 }
+          physics Physics {
+            mass 20
+          }
         }
       }
 
-      # REAR RIGHT
+      # --- REAR RIGHT WHEEL ---
       HingeJoint {
-        jointParameters HingeJointParameters { axis 0 0 1 anchor -1.7 0.5 -1.0 }
-        device [ RotationalMotor { name "wheel_rr" } ]
+        jointParameters HingeJointParameters {
+          axis 0 0 1
+          anchor -1.7 0.5 -1.0
+        }
+        device [
+          RotationalMotor {
+            # unique name for driving motor
+            name "wheel_rr"
+          }
+        ]
         endPoint VehicleWheel {
-          name "wheel_rr"
+          name "wheel_rr_solid"
           wheelRadius 0.5
           thickness 0.4
-          physics Physics { mass 20 }
+          physics Physics {
+            mass 20
+          }
         }
       }
     ]

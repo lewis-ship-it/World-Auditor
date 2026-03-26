@@ -1,0 +1,114 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/bmw/BmwX5Wheel.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/bmw/BmwX5FrontLight.proto"
+# ... (all your other EXTERNPROTOS stay here)
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/vehicles/protos/abstract/AckermannVehicle.proto"
+
+PROTO BmwX5Simple [
+  field SFVec3f    translation         0 0.4 0
+  field SFRotation rotation            0 1 0 0
+  field SFString   name                "bmw"
+  field SFString   controller          "vehicle_controller"
+  field SFColor    color               0.43 0.11 0.1  # Added: Custom Car Color
+  field MFNode     sensorsSlotFront    []
+  field MFNode     sensorsSlotTop      []
+  field MFNode     sensorsSlotCenter   []
+]
+{
+  AckermannVehicle {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    controller IS controller
+    
+    wheelbase 2.995
+    trackFront 1.628
+    trackRear 1.628
+
+    boundingObject Group {
+      children [
+        Transform {
+          translation 0 0.6 0
+          children [ Box { size 1.7 1.3 4.5 } ]
+        }
+      ] [cite: 3]
+    }
+    
+    physics Physics {
+      mass 1800
+      centerOfMass [ 0 0.1 0 ] [cite: 4]
+    }
+
+    extensionSlot [
+      # --- SENSOR ANCHORS ---
+      # Front Sensor (e.g., Radar/Camera)
+      Transform {
+        translation 0 0.5 2.3
+        children IS sensorsSlotFront
+      }
+      # Top Sensor (e.g., Lidar)
+      Transform {
+        translation 0 1.45 0
+        children IS sensorsSlotTop
+      }
+      # Center/Interior Sensors
+      Transform {
+        translation 0 0.8 0.5
+        children IS sensorsSlotCenter
+      }
+
+      # Audio Output
+      Speaker {
+        name "engine_speaker"
+      }
+
+      # --- WHEEL JOINTS ---
+      # Front Left
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 1 0 anchor 0.814 0 1.5 } [cite: 5]
+        device [ RotationalMotor { name "steer_fl" } ]
+        endPoint Slot { type "vehicle wheel" endPoint BmwX5Wheel { name "front left wheel" } }
+      }
+      # Front Right
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 0 1 0 anchor -0.814 0 1.5 } [cite: 6]
+        device [ RotationalMotor { name "steer_fr" } ]
+        endPoint Slot { type "vehicle wheel" endPoint BmwX5Wheel { name "front right wheel" wheelSide TRUE } } [cite: 7]
+      }
+      # Rear Left
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 1 0 0 anchor 0.814 0 -1.5 }
+        device [ RotationalMotor { name "wheel_rl" } ]
+        endPoint Slot { type "vehicle wheel" endPoint BmwX5Wheel { name "rear left wheel" wheelSide TRUE } } [cite: 8]
+      }
+      # Rear Right
+      HingeJoint {
+        jointParameters HingeJointParameters { axis 1 0 0 anchor -0.814 0 -1.5 } [cite: 9]
+        device [ RotationalMotor { name "wheel_rr" } ]
+        endPoint Slot { type "vehicle wheel" endPoint BmwX5Wheel { name "rear right wheel" } }
+      }
+
+      # --- BMW VISUAL MESHES ---
+      Pose {
+        rotation 0.57735 0.57735 0.57735 2.094395 [cite: 10]
+        children [
+          BmwX5Mesh {
+            color IS color  # Pass the PROTO color field to the mesh
+          }
+          BmwX5FrontLight {}
+          BmwX5RightIndicator {}
+          BmwX5LeftIndicator {}
+          BmwX5AntiFogLight {}
+          BmwX5RearLight {}
+          BmwX5BrakingLight {} [cite: 11]
+          BmwX5BackwardsLight {}
+          BmwX5RightWiper {}
+          BmwX5LeftWiper {}
+          BmwX5RightWingMirror {}
+          BmwX5LeftWingMirror {}
+        ]
+      }
+    ]
+  }
+}

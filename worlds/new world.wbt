@@ -1,33 +1,37 @@
 #VRML_SIM R2025a utf8
 
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "C:/Users/Administrator/Desktop/World_auditor/worlds/protos/AdvancedAISUV.proto"
+EXTERNPROTO "../protos/BmwX5.proto"
 
 WorldInfo {
   basicTimeStep 10
 }
 Viewpoint {
-  orientation 0.012498842600333179 0.01153689981291764 -0.9998553289733264 1.6509405447192886
-  position 1.8234961796625209 14.155366460376056 1.0243442230062572
+  orientation -0.016805468088462436 0.016809878229680136 0.9997174622043125 4.712102795488552
+  position -32.67680829751013 54.06439562038665 5.114364721499797
 }
 TexturedBackground {
 }
 TexturedBackgroundLight {
 }
 RectangleArena {
-  floorSize 30 30
+  floorSize 100 100
+  wallHeight 4
 }
-AdvancedAISUV {
-  hidden position_0_0 8.551349170058625e-12
-  hidden position2_0_0 -0.0004428756637996737
-  hidden position_0_1 -9.842217304935231e-12
-  hidden position2_0_1 -0.0004428754986727056
-  hidden position_0_2 -9.063560302280393e-08
-  hidden position_0_3 -9.063560391098235e-08
-  hidden rotation_1 4.275674585029311e-12 0.9999999999999998 -1.930869029226152e-08 0.0004428756637211332
-  hidden rotation_2 4.921108652467614e-12 -0.9999999999999998 2.2223440162217815e-08 0.00044287549826897606
-  hidden rotation_3 0 1 0 8.940696716308595e-08
-  hidden rotation_4 0 -0.9999999999999999 0 8.940696716308595e-08
-  translation 0.01616759669912347 7.122390454617715e-10 0.4511335751114237
-  rotation 2.9267151403414627e-08 0.999999999999997 6.9723726153569e-08 0.018893013347299578
+BmwX5 {
+  hidden position_0_0 -6.498852966258492e-08
+  hidden position2_0_0 300.2043219954665
+  hidden position_0_1 6.501740595329611e-08
+  hidden position2_0_1 300.2043237603064
+  hidden position_0_2 266.5740438577166
+  hidden position_0_3 266.5740111468783
+  hidden rotation_1 -3.249426483129243e-08 0.9999999999999988 3.902896671484195e-08 1.3885727491536515
+  hidden rotation_2 -3.250870297664803e-08 -0.9999999999999988 -3.904637848868831e-08 1.388570984313743
+  hidden rotation_3 0 -1 0 2.6802609561739854
+  hidden rotation_4 0 1 0 2.680228245335688
+  translation -23.730052359881924 6.388320763372929e-05 0.1724309448672589
+  rotation -4.057218290421966e-06 -0.9999998428379323 -0.0005606314742541788 0.015251193282180322
+  controller "vehicle_controller"
 }
